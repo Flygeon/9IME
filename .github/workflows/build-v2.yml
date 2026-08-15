@@ -35,9 +35,20 @@ jobs:
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile rime.7z -Headers $headers -TimeoutSec 300
           choco install 7zip.install -y --no-progress
           & "C:\Program Files\7-Zip\7z.exe" x rime.7z -orime-out -y | Out-Null
-          Copy-Item "rime-out/rime.dll" "target/release/" -ErrorAction Stop
-          if (Test-Path "rime-out/data") { Copy-Item "rime-out/data" "target/release/data" -Recurse -ErrorAction Stop }
-          Get-ChildItem "rime-out" | Select-Object -First 10 Name | Out-String
+          # locate rime.dll wherever it lives in the archive
+          $dll = Get-ChildItem -Path rime-out -Recurse -Filter rime.dll | Select-Object -First 1
+          if (-not $dll) { throw "rime.dll not found in archive" }
+          Copy-Item $dll.FullName "target/release/" -ErrorAction Stop
+          Write-Output "rime.dll from: $($dll.FullName)"
+          # locate the data dir (contains *.schema.yaml or opencc/)
+          $dataDir = Get-ChildItem -Path rime-out -Recurse -Directory | Where-Object {
+            (Get-ChildItem $_.FullName -Filter *.schema.yaml -ErrorAction SilentlyContinue | Select-Object -First 1) -or (Test-Path (Join-Path $_.FullName "opencc"))
+          } | Select-Object -First 1
+          if ($dataDir) {
+            Copy-Item $dataDir.FullName "target/release/data" -Recurse -ErrorAction Stop
+            Write-Output "data from: $($dataDir.FullName)"
+          } else { Write-Output "WARNING: no data dir found" }
+          Get-ChildItem rime-out -Recurse -Depth 2 | Select-Object -First 25 FullName | Out-String
       - name: Build installer (NSIS)
         shell: pwsh
         run: |
