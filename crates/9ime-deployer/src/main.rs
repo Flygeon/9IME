@@ -33,7 +33,12 @@ struct App {
 }
 
 impl App {
-    fn new() -> Self {
+    fn new(cc: &eframe::CreationContext) -> Self {
+        load_cjk_font(&cc.egui_ctx);
+        Self::default_state()
+    }
+
+    fn default_state() -> Self {
         App {
             skins: list_skins(),
             selected: config::load().skin,
@@ -110,6 +115,33 @@ impl eframe::App for App {
     }
 }
 
+/// egui ships no CJK glyphs; add a system font so Chinese UI text works.
+fn load_cjk_font(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    let candidates = [
+        "C:\\Windows\\Fonts\\msyh.ttc",
+        "C:\\Windows\\Fonts\\simhei.ttf",
+        "C:\\Windows\\Fonts\\msyhl.ttc",
+    ];
+    for path in candidates {
+        if let Ok(bytes) = std::fs::read(path) {
+            let name = path.split("\\").last().unwrap_or("cjk").to_string();
+            fonts
+                .font_data
+                .insert(name.clone(), egui::FontData::from_owned(bytes).into());
+            for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+                fonts
+                    .families
+                    .entry(family)
+                    .or_default()
+                    .push(name.clone());
+            }
+            break;
+        }
+    }
+    ctx.set_fonts(fonts);
+}
+
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([420.0, 540.0]),
@@ -118,6 +150,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "9IME 设置",
         options,
-        Box::new(|_cc| Ok(Box::new(App::new()) as Box<dyn eframe::App>)),
+        Box::new(|cc| Ok(Box::new(App::new(cc)) as Box<dyn eframe::App>)),
     )
 }

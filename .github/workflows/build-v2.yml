@@ -26,12 +26,18 @@ jobs:
           $headers = @{}
           if ($env:GH_TOKEN) { $headers.Authorization = "Bearer $env:GH_TOKEN" }
           $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/rime/librime/releases/latest" -Headers $headers -TimeoutSec 60
-          $asset = $rel.assets | Where-Object { $_.name -like "librime-windows-x64-*.zip" } | Select-Object -First 1
-          if (-not $asset) { throw "no windows zip asset in $($rel.tag_name)" }
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile rime.zip -Headers $headers -TimeoutSec 300
-          Expand-Archive rime.zip -DestinationPath rime-out
+          Write-Output "release tag: $($rel.tag_name)"
+          $asset = $rel.assets | Where-Object { $_.name -like "rime-*-Windows-msvc-x64.7z" } | Select-Object -First 1
+          if (-not $asset) { $asset = $rel.assets | Where-Object { $_.name -like "librime-windows-x64-*.zip" } | Select-Object -First 1 }
+          if (-not $asset) { $asset = $rel.assets | Where-Object { $_.name -notlike "rime-deps-*" -and $_.name -like "*x64*" } | Select-Object -First 1 }
+          if (-not $asset) { throw "no windows x64 librime asset in $($rel.tag_name): $($rel.assets.name -join ", ")" }
+          Write-Output "asset: $($asset.name)"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile rime.7z -Headers $headers -TimeoutSec 300
+          choco install 7zip.install -y --no-progress
+          & "C:\Program Files\7-Zip\7z.exe" x rime.7z -orime-out -y | Out-Null
           Copy-Item "rime-out/rime.dll" "target/release/" -ErrorAction Stop
           if (Test-Path "rime-out/data") { Copy-Item "rime-out/data" "target/release/data" -Recurse -ErrorAction Stop }
+          Get-ChildItem "rime-out" | Select-Object -First 10 Name | Out-String
       - name: Build installer (NSIS)
         shell: pwsh
         run: |

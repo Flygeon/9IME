@@ -1,4 +1,4 @@
-; 9IME v2 installer
+﻿; 9IME v2 installer
 Unicode true
 Name "9IME"
 !cd "..\target\release"
