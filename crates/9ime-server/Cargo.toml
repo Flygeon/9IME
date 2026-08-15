@@ -7,6 +7,8 @@ license.workspace = true
 [dependencies]
 nineime-librime = { path = "../9ime-librime" }
 nineime-ipc = { path = "../9ime-ipc" }
+nineime-core = { path = "../9ime-core" }
+png = "0.17"
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",

@@ -145,6 +145,12 @@ fn handle(
             let context = sess.get_context().map(|c| context_msg(&c)).unwrap_or_default();
             let status = sess.get_status().map(|s| status_msg(&s)).unwrap_or_default();
             let mut st = ui.lock().unwrap();
+            // skin hot-reload: re-read the user config on every key event
+            let want = nineime_core::config::load().skin;
+            if st.loaded_skin != want {
+                st.loaded_skin = want.clone();
+                st.skin = crate::skin::load_skin(&want);
+            }
             st.context = context.clone();
             st.status = status.clone();
             st.anchor_x = anchor_x;

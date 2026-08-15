@@ -29,9 +29,20 @@ Local validation: `cargo +stable-x86_64-pc-windows-gnu check --workspace`
    (placebo engine), proving activate -> key sink -> edit session pipeline.
 4. Remove: `regsvr32 /u nineime_tsf.dll`
 
-## M3 (next): engine server process + named-pipe IPC + Direct2D candidate
-window; TSF DLL forwards keys to the server which owns librime.
+## M3 engine server + candidate window (done at code level)
+- crates/9ime-ipc: length-prefixed JSON protocol over \\.\pipe\9ime.
+- crates/9ime-server: owns librime (one session, one thread), named-pipe
+  server, GDI candidate window (caret-anchored, topmost).
+- crates/9ime-tsf: IPC client replaces the M2 placeholder; launches the
+  server next to the DLL on first key.
 
-## M4: .ssf skin parsing + rendering + egui deployer (import/select/preview).
-## M5: installer + skin hot-reload.
+## M4 skin + deployer (done at code level)
+- nineime-core: .ssf containers (zip + encrypted "Skin" AES-256-CBC zlib
+  archive), skin.ini parsing (UTF-16LE/UTF-8/GBK), skin model (9-slice
+  margins, pinyin/zhongwen marges, colors, fonts), 9ime.json config.
+- server: loads the active skin from %APPDATA%\9IME\skins, renders
+  background/highlight images 9-sliced via GDI, hot-reloads on config change.
+- crates/9ime-deployer (egui): import/select/remove skins, deploy trigger.
+
+## M5 (next): installer (NSIS) + packaging; CI artifacts.
 ## M6: CI workflow + squash-rewrite of the Flygeon/9IME repository.

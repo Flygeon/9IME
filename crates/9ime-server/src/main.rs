@@ -10,6 +10,7 @@ use nineime_ipc::{ContextMsg, MenuMsg, StatusMsg};
 use nineime_librime::{ffi::RimeTraits, Rime};
 
 mod pipe;
+mod skin;
 mod window;
 
 /// State shared with the UI thread (candidate window).
@@ -19,6 +20,8 @@ pub struct UiState {
     pub visible: bool,
     pub anchor_x: i32,
     pub anchor_y: i32,
+    pub skin: Option<nineime_core::skin::Skin>,
+    pub loaded_skin: String,
 }
 
 impl UiState {
@@ -29,6 +32,8 @@ impl UiState {
             visible: false,
             anchor_x: 0,
             anchor_y: 0,
+            skin: None,
+            loaded_skin: String::new(),
         }
     }
 }
@@ -88,7 +93,47 @@ pub fn status_msg(st: &nineime_librime::Status) -> StatusMsg {
     }
 }
 
+
+/// Run librime deployment and exit (used by the deployer / installer).
+fn deploy_only() {
+    let base = exe_dir();
+    let dll = base.join("rime.dll");
+    let user = appdata_dir();
+    let _ = std::fs::create_dir_all(&user);
+    let rime = match Rime::load(&dll) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("deploy: cannot load librime: {e}");
+            std::process::exit(1);
+        }
+    };
+    let shared_c = cstr(&base.to_string_lossy());
+    let user_c = cstr(&user.to_string_lossy());
+    let app_c = cstr("rime.9ime");
+    let mut traits = RimeTraits::default();
+    traits.shared_data_dir = shared_c.as_ptr();
+    traits.user_data_dir = user_c.as_ptr();
+    traits.app_name = app_c.as_ptr();
+    traits.min_log_level = 1;
+    if let Err(e) = rime.initialize(&traits) {
+        eprintln!("deploy: initialize failed: {e}");
+        std::process::exit(1);
+    }
+    match rime.deploy(true) {
+        Ok(ok) => println!("deploy ok={ok}"),
+        Err(e) => {
+            eprintln!("deploy failed: {e}");
+            std::process::exit(1);
+        }
+    }
+    let _ = rime.finalize();
+}
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--deploy") {
+        deploy_only();
+        return;
+    }
     let base = exe_dir();
     let dll = base.join("rime.dll");
     let shared = base.clone();

@@ -5,3 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+encoding_rs = "0.8"
+flate2 = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }

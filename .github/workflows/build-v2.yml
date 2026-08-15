@@ -1,0 +1,29 @@
+name: build-v2
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (release)
+        run: cargo build --release --workspace
+      - name: Test
+        run: cargo test --workspace
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nineime-v2
+          path: |
+            target/release/nineime_tsf.dll
+            target/release/nineime-server.exe
+            target/release/nineime-deployer.exe
+            target/release/nineime-console.exe

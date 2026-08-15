@@ -7,6 +7,7 @@ members = [
   "crates/9ime-tsf",
   "crates/9ime-ipc",
   "crates/9ime-server",
+  "crates/9ime-deployer",
 ]
 
 [workspace.package]
