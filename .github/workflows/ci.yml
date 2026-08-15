@@ -96,9 +96,20 @@ jobs:
 
       - name: Get Rime files
         shell: pwsh
+        env:
+          # authenticate the GitHub API query to avoid shared-runner
+          # unauthenticated rate limits (403)
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $ErrorActionPreference = 'Stop'
-          .\get-rime.ps1 -use dev
+          $conf = Join-Path $env:UserProfile '.get-rime.conf.ps1'
+          $content = '$global:authorization = ''' + $env:GITHUB_TOKEN + ''''
+          [System.IO.File]::WriteAllText($conf, $content)
+          try {
+            .\get-rime.ps1 -use dev
+          } finally {
+            Remove-Item $conf -ErrorAction SilentlyContinue
+          }
 
       - name: Build data
         shell: pwsh
