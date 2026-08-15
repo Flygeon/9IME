@@ -17,6 +17,7 @@ jobs:
       BOOST_ROOT: ${{ github.workspace }}\deps\boost_1_84_0
       SDKVER: 10.0.19041.0
     strategy:
+      fail-fast: false
       matrix:
         variant: [msbuild, xmake]
     steps:
