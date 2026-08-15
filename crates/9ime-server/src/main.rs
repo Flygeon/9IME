@@ -129,18 +129,27 @@ fn deploy_only() {
     // Deployer mode: deployer_initialize + prebuild + deploy, no session
     // initialize (same pattern as the weasel deployer).
     let api = rime.api();
-    let di = api.deployer_initialize.ok_or_else(|| {
-        eprintln!("deploy failed: deployer_initialize unavailable");
-        std::process::exit(1);
-    });
-    let pb = api.prebuild.ok_or_else(|| {
-        eprintln!("deploy failed: prebuild unavailable");
-        std::process::exit(1);
-    });
-    let dp = api.deploy.ok_or_else(|| {
-        eprintln!("deploy failed: deploy unavailable");
-        std::process::exit(1);
-    });
+    let di = match api.deployer_initialize {
+        Some(f) => f,
+        None => {
+            eprintln!("deploy failed: deployer_initialize unavailable");
+            std::process::exit(1);
+        }
+    };
+    let pb = match api.prebuild {
+        Some(f) => f,
+        None => {
+            eprintln!("deploy failed: prebuild unavailable");
+            std::process::exit(1);
+        }
+    };
+    let dp = match api.deploy {
+        Some(f) => f,
+        None => {
+            eprintln!("deploy failed: deploy unavailable");
+            std::process::exit(1);
+        }
+    };
     // SAFETY: no concurrent librime use.
     unsafe { di(&traits as *const RimeTraits as *mut RimeTraits) };
     let prebuilt = unsafe { pb() } != 0;
