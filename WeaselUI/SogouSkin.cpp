@@ -487,20 +487,22 @@ bool SogouSkin::ParseSkinIni() {
   // schemes
   bool h1_ok = ParseScheme(L"Scheme_H1", h_, L"");
   bool v1_ok = ParseScheme(L"Scheme_V1", v_, L"");
-  Log(L"[skin] Scheme_H1 pic: " + (h1_ok ? std::to_wstring(h_.img_w) +
-                                       L"x" + std::to_wstring(h_.img_h)
-                                       : L"MISSING"));
-  Log(L"[skin] Scheme_V1 pic: " + (v1_ok ? std::to_wstring(v_.img_w) +
-                                       L"x" + std::to_wstring(v_.img_h)
-                                       : L"MISSING"));
+  std::wstring h1_info =
+      h1_ok ? std::to_wstring(h_.img_w) + L"x" + std::to_wstring(h_.img_h)
+            : L"MISSING";
+  std::wstring v1_info =
+      v1_ok ? std::to_wstring(v_.img_w) + L"x" + std::to_wstring(v_.img_h)
+            : L"MISSING";
+  Log(L"[skin] Scheme_H1 pic: " + h1_info);
+  Log(L"[skin] Scheme_V1 pic: " + v1_info);
   // optional second-scheme highlight images
   h_.preedit_highlight = LoadBitmap(GetString(L"Scheme_H2", L"pinyin_pic"));
   h_.candidate_highlight = LoadBitmap(GetString(L"Scheme_H2", L"zhongwen_pic"));
   v_.preedit_highlight = LoadBitmap(GetString(L"Scheme_V2", L"pinyin_pic"));
   v_.candidate_highlight = LoadBitmap(GetString(L"Scheme_V2", L"zhongwen_pic"));
-  Log(L"[skin] H2 highlight: " +
-      (h_.candidate_highlight ? L"ok" : L"none") + L", V2 highlight: " +
-      (v_.candidate_highlight ? L"ok" : L"none"));
+  std::wstring h2_info = h_.candidate_highlight ? L"ok" : L"none";
+  std::wstring v2_info = v_.candidate_highlight ? L"ok" : L"none";
+  Log(L"[skin] H2 highlight: " + h2_info + L", V2 highlight: " + v2_info);
 
   // fallback background color: average color of the stretch region
   {
