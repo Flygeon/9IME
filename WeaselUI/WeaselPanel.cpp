@@ -1192,6 +1192,11 @@ void WeaselPanel::DoPaint(CDCHandle dc) {
         // 9IME: draw the Sogou skin background (9-grid stretched)
         const SogouSkin::Scheme& sc = skin_vertical ? m_skin.vertical()
                                                     : m_skin.horizontal();
+        SogouSkin::Log(L"[paint] drawing skin background, win=" +
+                       std::to_wstring(rcw.Width()) + L"x" +
+                       std::to_wstring(rcw.Height()) + L" img=" +
+                       std::to_wstring(sc.img_w) + L"x" +
+                       std::to_wstring(sc.img_h));
         m_skin.DrawBackground(memDC, rcw, sc);
         m_skin.DrawSeparator(memDC, rcw, sc,
                              MulDiv(m_skin.font_size(), 4, 3));

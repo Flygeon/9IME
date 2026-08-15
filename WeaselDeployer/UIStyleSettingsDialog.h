@@ -36,6 +36,7 @@ class UIStyleSettingsDialog : public CDialogImpl<UIStyleSettingsDialog> {
   void PopulateSkins();
   void SelectSkin(const std::wstring& file_name);
   bool ApplySkinSelection();
+  void UpdateSkinUiState();
 
   UIStyleSettings* settings_;
   bool loaded_;
@@ -49,6 +50,7 @@ class UIStyleSettingsDialog : public CDialogImpl<UIStyleSettingsDialog> {
   CComboBox skin_list_;
   CButton import_skin_;
   CButton remove_skin_;
+  CStatic skin_hint_;
   std::vector<std::wstring> skin_files_;
   bool skin_changed_;
   int skin_pending_;  // combo selection at OK time; 0 = no skin

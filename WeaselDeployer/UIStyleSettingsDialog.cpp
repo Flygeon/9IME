@@ -46,6 +46,7 @@ LRESULT UIStyleSettingsDialog::OnInitDialog(UINT, WPARAM, LPARAM, BOOL&) {
   skin_list_.Attach(GetDlgItem(IDC_SKIN_COMBO));
   import_skin_.Attach(GetDlgItem(IDC_IMPORT_SKIN));
   remove_skin_.Attach(GetDlgItem(IDC_REMOVE_SKIN));
+  skin_hint_.Attach(GetDlgItem(IDC_SKIN_HINT));
 
   Populate();
   PopulateSkins();
@@ -74,6 +75,16 @@ void UIStyleSettingsDialog::PopulateSkins() {
   skin_list_.SetCurSel(index);
   skin_pending_ = index;
   skin_changed_ = false;
+  UpdateSkinUiState();
+}
+
+// 9IME: while a skin is active the color scheme is overridden by the skin,
+// so disable the color scheme picker to avoid confusion.
+void UIStyleSettingsDialog::UpdateSkinUiState() {
+  bool skin_active = (skin_pending_ > 0 &&
+                      skin_pending_ <= (int)skin_files_.size());
+  color_schemes_.EnableWindow(!skin_active);
+  skin_hint_.ShowWindow(skin_active ? SW_SHOW : SW_HIDE);
 }
 
 // 9IME: select an entry in the skin combo by file name
@@ -153,6 +164,7 @@ LRESULT UIStyleSettingsDialog::OnRemoveSkin(WORD, WORD, HWND, BOOL&) {
   skin_list_.SetCurSel(0);
   skin_pending_ = 0;
   skin_changed_ = true;
+  UpdateSkinUiState();
   return 0;
 }
 
@@ -161,6 +173,7 @@ LRESULT UIStyleSettingsDialog::OnSkinSelChange(WORD, WORD, HWND, BOOL&) {
   if (sel >= 0) {
     skin_pending_ = sel;
     skin_changed_ = true;
+    UpdateSkinUiState();
   }
   return 0;
 }
