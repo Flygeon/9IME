@@ -595,8 +595,11 @@ void SogouSkin::DrawBackground(HDC dc,
                   int dh2) {
     if (dw2 <= 0 || dh2 <= 0 || sw2 <= 0 || sh2 <= 0)
       return;
-    g.DrawImage(scheme.pic, dx, dy, dw2, dh2, sx, sy, sw2, sh2,
-                Gdiplus::UnitPixel);
+    g.DrawImage(scheme.pic, Gdiplus::RectF((Gdiplus::REAL)dx, (Gdiplus::REAL)dy,
+                                           (Gdiplus::REAL)dw2,
+                                           (Gdiplus::REAL)dh2),
+                (Gdiplus::REAL)sx, (Gdiplus::REAL)sy, (Gdiplus::REAL)sw2,
+                (Gdiplus::REAL)sh2, Gdiplus::UnitPixel);
   };
   // corners
   draw(0, 0, src_l, src_t, rc.left, rc.top, dl, dt);
@@ -635,7 +638,8 @@ void SogouSkin::DrawSeparator(HDC dc,
   int x2 = rc.left + S(scheme.candidate_right);
   if (x2 <= x1)
     x2 = rc.right - 1;
-  g.DrawLine(&pen, (REAL)x1, (REAL)y, (REAL)x2, (REAL)y);
+  g.DrawLine(&pen, (Gdiplus::REAL)x1, (Gdiplus::REAL)y, (Gdiplus::REAL)x2,
+             (Gdiplus::REAL)y);
 }
 
 void SogouSkin::DrawHighlight(HDC dc,
