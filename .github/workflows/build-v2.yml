@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -18,6 +20,23 @@ jobs:
         run: cargo build --release --workspace
       - name: Test
         run: cargo test --workspace
+      - name: Fetch librime (rime.dll + data)
+        shell: pwsh
+        run: |
+          $headers = @{}
+          if ($env:GH_TOKEN) { $headers.Authorization = "Bearer $env:GH_TOKEN" }
+          $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/rime/librime/releases/latest" -Headers $headers -TimeoutSec 60
+          $asset = $rel.assets | Where-Object { $_.name -like "librime-windows-x64-*.zip" } | Select-Object -First 1
+          if (-not $asset) { throw "no windows zip asset in $($rel.tag_name)" }
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile rime.zip -Headers $headers -TimeoutSec 300
+          Expand-Archive rime.zip -DestinationPath rime-out
+          Copy-Item "rime-out/rime.dll" "target/release/" -ErrorAction Stop
+          if (Test-Path "rime-out/data") { Copy-Item "rime-out/data" "target/release/data" -Recurse -ErrorAction Stop }
+      - name: Build installer (NSIS)
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          makensis "scripts/installer.nsi"
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -27,3 +46,6 @@ jobs:
             target/release/nineime-server.exe
             target/release/nineime-deployer.exe
             target/release/nineime-console.exe
+            target/release/rime.dll
+            target/release/data
+            target/release/9IME-Setup-0.1.0.exe

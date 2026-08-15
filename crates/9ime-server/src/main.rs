@@ -98,6 +98,11 @@ pub fn status_msg(st: &nineime_librime::Status) -> StatusMsg {
 fn deploy_only() {
     let base = exe_dir();
     let dll = base.join("rime.dll");
+    let shared = if base.join("data").is_dir() {
+        base.join("data")
+    } else {
+        base.clone()
+    };
     let user = appdata_dir();
     let _ = std::fs::create_dir_all(&user);
     let rime = match Rime::load(&dll) {
@@ -107,7 +112,7 @@ fn deploy_only() {
             std::process::exit(1);
         }
     };
-    let shared_c = cstr(&base.to_string_lossy());
+    let shared_c = cstr(&shared.to_string_lossy());
     let user_c = cstr(&user.to_string_lossy());
     let app_c = cstr("rime.9ime");
     let mut traits = RimeTraits::default();
@@ -136,7 +141,11 @@ fn main() {
     }
     let base = exe_dir();
     let dll = base.join("rime.dll");
-    let shared = base.clone();
+    let shared = if base.join("data").is_dir() {
+        base.join("data")
+    } else {
+        base.clone()
+    };
     let user = appdata_dir();
     let _ = std::fs::create_dir_all(&user);
 
