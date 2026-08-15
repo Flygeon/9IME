@@ -4,6 +4,7 @@ members = [
   "crates/9ime-librime",
   "crates/9ime-core",
   "crates/9ime-console",
+  "crates/9ime-tsf",
 ]
 
 [workspace.package]

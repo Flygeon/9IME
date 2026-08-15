@@ -1,0 +1,22 @@
+[package]
+name = "nineime-tsf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_Security",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Registry",
+  "Win32_UI_TextServices",
+  "Win32_UI_Input_KeyboardAndMouse",
+] }
+# The #[implement] macro generates `::windows_core` paths; keep the crate
+# in the extern prelude with that name.
+windows-core = { version = "0.62.2" }
