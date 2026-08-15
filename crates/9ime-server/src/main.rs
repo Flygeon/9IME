@@ -107,6 +107,9 @@ fn deploy_only() {
     };
     let user = appdata_dir();
     let _ = std::fs::create_dir_all(&user);
+    let log_dir = user.join("log");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_c = cstr(&log_dir.to_string_lossy());
     let rime = match Rime::load(&dll) {
         Ok(r) => r,
         Err(e) => {
@@ -121,23 +124,39 @@ fn deploy_only() {
     traits.shared_data_dir = shared_c.as_ptr();
     traits.user_data_dir = user_c.as_ptr();
     traits.app_name = app_c.as_ptr();
-    traits.min_log_level = 1;
+    traits.min_log_level = 0;
+    traits.log_dir = log_c.as_ptr();
     // Deployer mode: deployer_initialize + prebuild + deploy, no session
     // initialize (same pattern as the weasel deployer).
-    match rime.deploy_direct(&traits) {
-        Ok(true) => {
-            println!("deploy ok");
-            std::process::exit(0);
-        }
-        Ok(false) => {
-            eprintln!("deploy failed: prebuild/deploy returned false");
-            std::process::exit(1);
-        }
-        Err(e) => {
-            eprintln!("deploy failed: {e}");
-            std::process::exit(1);
-        }
+    let api = rime.api();
+    let di = api.deployer_initialize.ok_or_else(|| {
+        eprintln!("deploy failed: deployer_initialize unavailable");
+        std::process::exit(1);
+    });
+    let pb = api.prebuild.ok_or_else(|| {
+        eprintln!("deploy failed: prebuild unavailable");
+        std::process::exit(1);
+    });
+    let dp = api.deploy.ok_or_else(|| {
+        eprintln!("deploy failed: deploy unavailable");
+        std::process::exit(1);
+    });
+    // SAFETY: no concurrent librime use.
+    unsafe { di(&traits as *const RimeTraits as *mut RimeTraits) };
+    let prebuilt = unsafe { pb() } != 0;
+    println!("prebuild result: {prebuilt}");
+    if !prebuilt {
+        eprintln!("prebuild failed - see log files in {}", user.join("log").display());
+        std::process::exit(1);
     }
+    let deployed = unsafe { dp() } != 0;
+    println!("deploy result: {deployed}");
+    if !deployed {
+        eprintln!("deploy failed - see log files in {}", user.join("log").display());
+        std::process::exit(1);
+    }
+    println!("deploy ok");
+    std::process::exit(0);
 }
 fn main() {
     let args: Vec<String> = std::env::args().collect();

@@ -66,12 +66,16 @@ impl App {
             let output = std::process::Command::new(&exe).arg("--deploy").output();
             let msg = match output {
                 Ok(o) if o.status.success() => {
+                    let _ = std::fs::write(nineime_core::config::appdata_dir().join("deploy.log"), o.stdout);
                     format!("部署完成（{} 秒）", started.elapsed().as_secs())
                 }
                 Ok(o) => {
-                    let err = String::from_utf8_lossy(&o.stderr);
+                    let mut log = o.stderr.clone();
+                    log.extend_from_slice(&o.stdout);
+                    let _ = std::fs::write(nineime_core::config::appdata_dir().join("deploy.log"), &log);
+                    let err = String::from_utf8_lossy(&log);
                     let err = err.trim();
-                    let tail = if err.len() > 300 { &err[err.len() - 300..] } else { err };
+                    let tail = if err.len() > 500 { &err[err.len() - 500..] } else { err };
                     format!("部署失败（exit={}）: {tail}", o.status.code().unwrap_or(-1))
                 }
                 Err(e) => format!("部署失败: {e}"),

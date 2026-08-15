@@ -72,7 +72,7 @@ impl Rime {
         Ok(Rime { lib })
     }
 
-    pub(crate) fn api(&self) -> &RimeApi {
+    pub fn api(&self) -> &RimeApi {
         self.lib.api()
     }
 
