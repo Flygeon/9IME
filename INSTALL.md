@@ -1,12 +1,11 @@
-# How to Rime with Weasel
+# How to build 9IME
 
 ## Preparation
 
-  - Install **Visual Studio 2017** for *Desktop development in C++*
-    with components *ATL*, *MFC* and *Windows XP support*.
-    Visual Studio 2015 or later versions may work with additional configuration.
+  - Install **Visual Studio 2022** for *Desktop development in C++*
+    with components *ATL*, *MFC*.
 
-  - Install dev tools: `git`, `cmake`， `clang-format(>=17.0.6)`
+  - Install dev tools: `git`, `cmake`, `clang-format(>=17.0.6)`
 
   - Download third-party libraries: `boost(>=1.60.0)`
 
@@ -21,12 +20,12 @@ Optional:
 Make sure all git submodules are checked out recursively.
 
 ```batch
-git clone --recursive https://github.com/rime/weasel.git
+git clone --recursive https://github.com/Flygeon/9IME.git
 ```
 
-## Build and Install Weasel
+## Build and Install 9IME
 
-Locate `weasel` source directory.
+Locate the source directory.
 
 ### Setup build environment
 
@@ -48,7 +47,6 @@ set BOOST_ROOT=X:\path\to\boost_N_NN_N
 ### Build
 
 ```batch
-cd weasel
 build.bat all
 ```
 
@@ -58,9 +56,9 @@ Installer will be generated in `output\archives` directory.
 
 ### Alternative: using prebuilt Rime binaries
 
-If you've already got a copy of prebuilt binaries of librime, you can simply
-copy `.dll`s / `.lib`s into `weasel\output` / `weasel\lib` directories
-respectively, then build Weasel without the `all` command line option.
+If you have a copy of prebuilt binaries of librime, copy the `.dll`s / `.lib`s
+into `output` / `lib` directories respectively, then build without the `all`
+command line option.
 
 ```batch
 build.bat boost data opencc
