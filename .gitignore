@@ -58,3 +58,7 @@ arm64x_wrapper/*.ime
 arm64x_wrapper/*.lib
 arm64x_wrapper/*.exp
 /输入法皮肤示例/
+
+# --- Rust (9IME v2) ---
+/target
+/crates/*/target
