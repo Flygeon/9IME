@@ -8,7 +8,6 @@ compile_commands.json
 /output/Win32/rime.dll
 /output/Win32/*.pdb
 /lib*/rime.lib
-/lib*/WinSparkle.lib
 /lib*/*.dll
 /lib*/*.pdb
 /output/*.exp
@@ -20,8 +19,6 @@ compile_commands.json
 /output/*.lib
 /output/Win32/*.lib
 /output/*.exe
-/output/*.dll
-/output/Win32/*.dll
 /output/rime.dll
 /output/weasel*.dll
 /output/*.ime
