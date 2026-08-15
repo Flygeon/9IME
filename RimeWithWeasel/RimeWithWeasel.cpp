@@ -1362,6 +1362,9 @@ static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
   {
     const int SKIN_BUF = 1024;
     char skin_buf[SKIN_BUF + 1] = {0};
+    // NOTE: when this runs for a schema (initialize == false), a missing
+    // style/skin must NOT clear the base setting from weasel.yaml; only a
+    // clean initialization clears it.
     if (rime_api->config_get_string(config, "style/skin", skin_buf, SKIN_BUF)) {
       std::wstring skin_path = u8tow(skin_buf);
       if (skin_path.empty())
@@ -1371,7 +1374,7 @@ static void _UpdateUIStyle(RimeConfig* config, UI* ui, bool initialize) {
         style.skin_file = skin_path;
       else
         style.skin_file = (WeaselUserDataPath() / skin_path).wstring();
-    } else {
+    } else if (initialize) {
       style.skin_file.clear();
     }
   }
