@@ -20,47 +20,12 @@ jobs:
         run: cargo build --release --workspace
       - name: Test
         run: cargo test --workspace
-      - name: Fetch librime (rime.dll)
+      - name: Stage librime (vendored rime.dll + data)
         shell: pwsh
         run: |
-          $headers = @{}
-          if ($env:GH_TOKEN) { $headers.Authorization = "Bearer $env:GH_TOKEN" }
-          $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/rime/librime/releases/latest" -Headers $headers -TimeoutSec 60
-          Write-Output "release tag: $($rel.tag_name)"
-          $asset = $rel.assets | Where-Object { $_.name -like "rime-*-Windows-msvc-x64.7z" } | Select-Object -First 1
-          if (-not $asset) { $asset = $rel.assets | Where-Object { $_.name -notlike "rime-deps-*" -and $_.name -like "*x64*" } | Select-Object -First 1 }
-          if (-not $asset) { throw "no windows x64 librime asset in $($rel.tag_name): $($rel.assets.name -join ", ")" }
-          Write-Output "asset: $($asset.name)"
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile rime.7z -Headers $headers -TimeoutSec 300
-          choco install 7zip.install -y --no-progress
-          & "C:\Program Files\7-Zip\7z.exe" x rime.7z -orime-out -y | Out-Null
-          $dll = Get-ChildItem -Path rime-out -Recurse -Filter rime.dll | Select-Object -First 1
-          if (-not $dll) { throw "rime.dll not found in archive" }
-          Copy-Item $dll.FullName "target/release/" -ErrorAction Stop
-          Write-Output "rime.dll from: $($dll.FullName)"
-      - name: Fetch RIME data (prelude + luna_pinyin + essay + opencc)
-        shell: pwsh
-        run: |
-          $data = "target/release/data"
-          New-Item -ItemType Directory -Force $data | Out-Null
-          # embed the token so git never tries to prompt
-          $auth = "https://x-access-token:$env:GH_TOKEN@github.com"
-          git clone --depth 1 "$auth/rime/rime-prelude.git" tmp-data-prelude
-          git clone --depth 1 "$auth/rime/rime-luna-pinyin.git" tmp-data-luna
-          git clone --depth 1 "$auth/rime/rime-essay.git" tmp-data-essay
-          git clone --depth 1 "$auth/rime/rime-opencc.git" tmp-data-opencc
-          foreach ($repo in @("tmp-data-prelude", "tmp-data-luna", "tmp-data-essay")) {
-            Get-ChildItem $repo -Force | Where-Object { $_.Name -ne ".git" } | Copy-Item -Destination $data -Recurse -Force
-          }
-          New-Item -ItemType Directory -Force "$data/opencc" | Out-Null
-          if (Test-Path "tmp-data-opencc/opencc") {
-            Copy-Item "tmp-data-opencc/opencc/*" "$data/opencc/" -Recurse -Force
-          } else {
-            Get-ChildItem tmp-data-opencc -Force | Where-Object { $_.Name -ne ".git" } | Copy-Item -Destination "$data/opencc" -Recurse -Force
-          }
-          Write-Output "--- data dir ---"
-          Get-ChildItem $data | Select-Object -First 20 Name | Out-String
-          Get-ChildItem "$data/opencc" | Select-Object -First 10 Name | Out-String
+          Copy-Item "vendor/rime/rime.dll" "target/release/" -ErrorAction Stop
+          Copy-Item "vendor/rime/data" "target/release/data" -Recurse -ErrorAction Stop
+          Write-Output "staged rime.dll + data"
       - name: Build installer (NSIS)
         shell: pwsh
         run: |
