@@ -89,8 +89,8 @@ bool ZlibInflate(const BYTE* src, size_t src_len, std::vector<BYTE>& out) {
   size_t cap = 1u << 20;  // 1 MiB
   while (cap <= (1u << 26)) {
     out.resize(cap);
-    size_t out_len = cap;
-    int st = mz_uncompress(out.data(), &out_len, src, src_len);
+    mz_ulong out_len = (mz_ulong)cap;
+    int st = mz_uncompress(out.data(), &out_len, src, (mz_ulong)src_len);
     if (st == MZ_OK) {
       out.resize(out_len);
       return true;
