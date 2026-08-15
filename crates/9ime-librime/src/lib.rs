@@ -114,18 +114,24 @@ impl Rime {
         if !started {
             return Ok(false);
         }
-        // Wait for maintenance to finish (100ms x 600 = up to 60s).
-        for _ in 0..600 {
+        // Wait up to 180s (100ms x 1800) for maintenance to finish.
+        let mut done = false;
+        for _ in 0..1800 {
             // SAFETY: read-only flag.
             if unsafe { is_mm() } == 0 {
+                done = true;
                 break;
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        // SAFETY: join the maintenance thread if one was spawned.
-        unsafe { join() };
-        // SAFETY: read-only flag.
-        Ok(unsafe { is_mm() } == 0)
+        if done {
+            // SAFETY: join the maintenance thread once it has finished.
+            unsafe { join() };
+            return Ok(true);
+        }
+        // Timed out: do not join (would block forever); report failure.
+        eprintln!("librime: deploy timed out after 180s");
+        Ok(false)
     }
 
     /// Deploy via the simpler deployer API: deployer_initialize + prebuild + deploy.

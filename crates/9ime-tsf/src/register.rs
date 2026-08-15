@@ -1,18 +1,40 @@
-//! Registry registration (regsvr32): CLSID + TSF TIP language profile.
+//! TSF registration (regsvr32): CLSID + TIP profile + categories.
+//!
+//! Mirrors the weasel deployer: the TIP profile is registered with
+//! ITfInputProcessorProfileMgr::RegisterProfile and the keyboard category
+//! with ITfCategoryMgr::RegisterCategory; without these the service does
+//! not show up in Win+Space / language settings.
 
-use windows::core::{GUID, HRESULT, PCWSTR};
+use windows::core::{GUID, PCWSTR};
 use windows::Win32::Foundation::WIN32_ERROR;
+use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
 use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
 use windows::Win32::System::Registry::{
     RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegSetValueExW, HKEY,
-    HKEY_CLASSES_ROOT, HKEY_LOCAL_MACHINE, KEY_ALL_ACCESS, REG_DWORD,
+    HKEY_CLASSES_ROOT, HKEY_LOCAL_MACHINE, KEY_ALL_ACCESS,
     REG_OPTION_NON_VOLATILE, REG_SZ, REG_VALUE_TYPE,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::HKL;
+use windows::Win32::UI::TextServices::{
+    CLSID_TF_CategoryMgr, CLSID_TF_InputProcessorProfiles,
+    GUID_TFCAT_CATEGORY_OF_TIP, GUID_TFCAT_TIPCAP_COMLESS,
+    GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT, GUID_TFCAT_TIPCAP_INPUTMODECOMPARTMENT,
+    GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT, GUID_TFCAT_TIP_KEYBOARD, ITfCategoryMgr,
+    ITfInputProcessorProfileMgr,
 };
 
 use crate::{CLSID_NINEIME, PROFILE_NINEIME};
 
 const TIP_ROOT: &str = "SOFTWARE\\Microsoft\\CTF\\TIP";
-const LANG_ZH_CN: &str = "0x00000804";
+
+const CATEGORIES: [GUID; 6] = [
+    GUID_TFCAT_CATEGORY_OF_TIP,
+    GUID_TFCAT_TIP_KEYBOARD,
+    GUID_TFCAT_TIPCAP_INPUTMODECOMPARTMENT,
+    GUID_TFCAT_TIPCAP_COMLESS,
+    GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
+    GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
+];
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -30,7 +52,9 @@ fn ok(err: WIN32_ERROR) -> windows::core::Result<()> {
     if err.0 == 0 {
         Ok(())
     } else {
-        Err(windows::core::Error::from_hresult(HRESULT::from_win32(err.0)))
+        Err(windows::core::Error::from_hresult(
+            windows::core::HRESULT::from_win32(err.0),
+        ))
     }
 }
 
@@ -61,7 +85,12 @@ fn create_key(parent: HKEY, sub: &str) -> windows::core::Result<HKEY> {
     Ok(key)
 }
 
-fn set_value(hkey: HKEY, name: &str, data: &[u8], ty: REG_VALUE_TYPE) -> windows::core::Result<()> {
+fn set_value(
+    hkey: HKEY,
+    name: &str,
+    data: &[u8],
+    ty: REG_VALUE_TYPE,
+) -> windows::core::Result<()> {
     let name_w = wide(name);
     ok(unsafe {
         RegSetValueExW(hkey, pcwstr(&name_w), None, ty, Some(data))
@@ -73,10 +102,6 @@ fn set_string(hkey: HKEY, name: &str, value: &str) -> windows::core::Result<()> 
     set_value(hkey, name, &u16_bytes(&v), REG_SZ)
 }
 
-fn set_dword(hkey: HKEY, name: &str, value: u32) -> windows::core::Result<()> {
-    set_value(hkey, name, &value.to_le_bytes(), REG_DWORD)
-}
-
 fn dll_path() -> Vec<u16> {
     let mut buf = vec![0u16; 2048];
     let n = unsafe { GetModuleFileNameW(None, &mut buf) };
@@ -84,12 +109,11 @@ fn dll_path() -> Vec<u16> {
     buf
 }
 
-/// Write CLSID InprocServer32 + TSF TIP language profile.
+/// Write CLSID InprocServer32 + register TIP profile and categories.
 pub unsafe fn register() -> windows::core::Result<()> {
     let clsid = guid_string(&CLSID_NINEIME);
-    let profile = guid_string(&PROFILE_NINEIME);
 
-    // HKCR\CLSID\{clsid}
+    // 1. COM server registration (lets the OS load the DLL)
     let clsid_key = create_key(HKEY_CLASSES_ROOT, &format!("CLSID\\{clsid}"))?;
     set_string(clsid_key, "", "9IME Text Service")?;
     let inproc = create_key(clsid_key, "InprocServer32")?;
@@ -99,24 +123,60 @@ pub unsafe fn register() -> windows::core::Result<()> {
     let _ = unsafe { RegCloseKey(inproc) };
     let _ = unsafe { RegCloseKey(clsid_key) };
 
-    // HKLM\SOFTWARE\Microsoft\CTF\TIP\{clsid}\LanguageProfile\0x00000804\{profile}
-    let tip = create_key(HKEY_LOCAL_MACHINE, &format!("{TIP_ROOT}\\{clsid}"))?;
-    let lang = create_key(tip, &format!("LanguageProfile\\{LANG_ZH_CN}\\{profile}"))?;
-    set_string(lang, "", "9IME")?;
-    set_dword(lang, "Enable", 1)?;
-    let _ = unsafe { RegCloseKey(lang) };
-    let _ = unsafe { RegCloseKey(tip) };
+    // 2. TIP language profile (Simplified Chinese, 0x0804), enabled by default
+    let profiles: ITfInputProcessorProfileMgr = CoCreateInstance(
+        &CLSID_TF_InputProcessorProfiles,
+        None,
+        CLSCTX_INPROC_SERVER,
+    )?;
+    let desc: Vec<u16> = "9IME".encode_utf16().collect();
+    let icon = dll_path();
+    unsafe {
+        profiles.RegisterProfile(
+            &CLSID_NINEIME,
+            0x0804,
+            &PROFILE_NINEIME,
+            &desc,
+            &icon,
+            0,
+            HKL(std::ptr::null_mut()),
+            0,
+            true,
+            0,
+        )
+    }?;
+
+    // 3. categories (keyboard TIP + capability flags)
+    let catmgr: ITfCategoryMgr =
+        CoCreateInstance(&CLSID_TF_CategoryMgr, None, CLSCTX_INPROC_SERVER)?;
+    for cat in CATEGORIES {
+        unsafe { catmgr.RegisterCategory(&CLSID_NINEIME, &cat, &CLSID_NINEIME) }?;
+    }
     Ok(())
 }
 
-/// Remove CLSID + TIP registration.
+/// Remove profile, categories, and raw registry keys.
 pub unsafe fn unregister() -> windows::core::Result<()> {
+    if let Ok(profiles) = CoCreateInstance::<_, ITfInputProcessorProfileMgr>(
+        &CLSID_TF_InputProcessorProfiles,
+        None,
+        CLSCTX_INPROC_SERVER,
+    ) {
+        let _ = unsafe { profiles.UnregisterProfile(&CLSID_NINEIME, 0x0804, &PROFILE_NINEIME, 0) };
+    }
+    if let Ok(catmgr) = CoCreateInstance::<_, ITfCategoryMgr>(
+        &CLSID_TF_CategoryMgr,
+        None,
+        CLSCTX_INPROC_SERVER,
+    ) {
+        for cat in CATEGORIES {
+            let _ = unsafe { catmgr.UnregisterCategory(&CLSID_NINEIME, &cat, &CLSID_NINEIME) };
+        }
+    }
     let clsid = guid_string(&CLSID_NINEIME);
     let clsid_w = wide(&clsid);
+    let _ = unsafe { RegDeleteTreeW(HKEY_CLASSES_ROOT, pcwstr(&clsid_w)) };
     let tip_w = wide(&format!("{TIP_ROOT}\\{clsid}"));
-    unsafe {
-        let _ = RegDeleteTreeW(HKEY_CLASSES_ROOT, pcwstr(&clsid_w));
-        let _ = RegDeleteTreeW(HKEY_LOCAL_MACHINE, pcwstr(&tip_w));
-    }
+    let _ = unsafe { RegDeleteTreeW(HKEY_LOCAL_MACHINE, pcwstr(&tip_w)) };
     Ok(())
 }

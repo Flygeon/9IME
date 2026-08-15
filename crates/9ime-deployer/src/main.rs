@@ -30,6 +30,7 @@ struct App {
     skins: Vec<String>,
     selected: String,
     status: String,
+    deploy_rx: Option<std::sync::mpsc::Receiver<String>>,
 }
 
 impl App {
@@ -43,10 +44,42 @@ impl App {
             skins: list_skins(),
             selected: config::load().skin,
             status: String::new(),
+            deploy_rx: None,
         }
     }
 }
 
+
+impl App {
+    /// Run nineime-server --deploy in the background and report the result.
+    fn start_deploy(&mut self) {
+        let exe = exe_dir().join("nineime-server.exe");
+        if !exe.exists() {
+            self.status = "未找到 nineime-server.exe".to_string();
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.deploy_rx = Some(rx);
+        self.status = "正在部署（首次部署可能需要几十秒）...".to_string();
+        std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            let output = std::process::Command::new(&exe).arg("--deploy").output();
+            let msg = match output {
+                Ok(o) if o.status.success() => {
+                    format!("部署完成（{} 秒）", started.elapsed().as_secs())
+                }
+                Ok(o) => {
+                    let err = String::from_utf8_lossy(&o.stderr);
+                    let err = err.trim();
+                    let tail = if err.len() > 300 { &err[err.len() - 300..] } else { err };
+                    format!("部署失败（exit={}）: {tail}", o.status.code().unwrap_or(-1))
+                }
+                Err(e) => format!("部署失败: {e}"),
+            };
+            let _ = tx.send(msg);
+        });
+    }
+}
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -99,14 +132,13 @@ impl eframe::App for App {
             }
             ui.add_space(8.0);
             if ui.button("重新部署输入方案 (deploy)").clicked() {
-                let exe = exe_dir().join("nineime-server.exe");
-                if exe.exists() {
-                    let _ = std::process::Command::new(&exe)
-                        .arg("--deploy")
-                        .spawn();
-                    self.status = "正在部署，请稍候...".to_string();
-                } else {
-                    self.status = "未找到 nineime-server.exe".to_string();
+                self.start_deploy();
+            }
+            // poll the deploy thread for completion
+            if let Some(rx) = &self.deploy_rx {
+                if let Ok(msg) = rx.try_recv() {
+                    self.status = msg;
+                    self.deploy_rx = None;
                 }
             }
             ui.add_space(8.0);

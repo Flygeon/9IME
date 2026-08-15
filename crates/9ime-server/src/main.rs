@@ -122,18 +122,22 @@ fn deploy_only() {
     traits.user_data_dir = user_c.as_ptr();
     traits.app_name = app_c.as_ptr();
     traits.min_log_level = 1;
-    if let Err(e) = rime.initialize(&traits) {
-        eprintln!("deploy: initialize failed: {e}");
-        std::process::exit(1);
-    }
-    match rime.deploy(true) {
-        Ok(ok) => println!("deploy ok={ok}"),
+    // Deployer mode: deployer_initialize + prebuild + deploy, no session
+    // initialize (same pattern as the weasel deployer).
+    match rime.deploy_direct(&traits) {
+        Ok(true) => {
+            println!("deploy ok");
+            std::process::exit(0);
+        }
+        Ok(false) => {
+            eprintln!("deploy failed: prebuild/deploy returned false");
+            std::process::exit(1);
+        }
         Err(e) => {
             eprintln!("deploy failed: {e}");
             std::process::exit(1);
         }
     }
-    let _ = rime.finalize();
 }
 fn main() {
     let args: Vec<String> = std::env::args().collect();
