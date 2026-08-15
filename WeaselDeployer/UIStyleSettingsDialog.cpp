@@ -109,8 +109,8 @@ LRESULT UIStyleSettingsDialog::OnOK(WORD, WORD code, HWND, BOOL&) {
   if (sel >= 0)
     skin_pending_ = sel;
   if (!ApplySkinSelection()) {
-    MessageBoxW(m_hWnd, L"写入 weasel.custom.yaml 失败，皮肤未应用。",
-                L"9IME", MB_OK | MB_ICONERROR);
+    MessageBoxW(L"写入 weasel.custom.yaml 失败，皮肤未应用。", L"9IME",
+                MB_OK | MB_ICONERROR);
   }
   EndDialog(code);
   return 0;
@@ -139,7 +139,7 @@ LRESULT UIStyleSettingsDialog::OnImportSkin(WORD, WORD, HWND, BOOL&) {
   if (!CopyFileW(src.c_str(), dst.c_str(), FALSE)) {
     DWORD err = GetLastError();
     if (err != ERROR_ALREADY_EXISTS || !CopyFileW(src.c_str(), dst.c_str(), TRUE)) {
-      MessageBoxW(m_hWnd, L"导入皮肤失败，请检查文件权限。", L"9IME",
+      MessageBoxW(L"导入皮肤失败，请检查文件权限。", L"9IME",
                   MB_OK | MB_ICONERROR);
       return 0;
     }
