@@ -43,10 +43,12 @@ jobs:
         run: |
           $data = "target/release/data"
           New-Item -ItemType Directory -Force $data | Out-Null
-          git clone --depth 1 https://github.com/rime/rime-prelude.git tmp-data-prelude
-          git clone --depth 1 https://github.com/rime/rime-luna-pinyin.git tmp-data-luna
-          git clone --depth 1 https://github.com/rime/rime-essay.git tmp-data-essay
-          git clone --depth 1 https://github.com/rime/rime-opencc.git tmp-data-opencc
+          # embed the token so git never tries to prompt
+          $auth = "https://x-access-token:$env:GH_TOKEN@github.com"
+          git clone --depth 1 "$auth/rime/rime-prelude.git" tmp-data-prelude
+          git clone --depth 1 "$auth/rime/rime-luna-pinyin.git" tmp-data-luna
+          git clone --depth 1 "$auth/rime/rime-essay.git" tmp-data-essay
+          git clone --depth 1 "$auth/rime/rime-opencc.git" tmp-data-opencc
           foreach ($repo in @("tmp-data-prelude", "tmp-data-luna", "tmp-data-essay")) {
             Get-ChildItem $repo -Force | Where-Object { $_.Name -ne ".git" } | Copy-Item -Destination $data -Recurse -Force
           }
