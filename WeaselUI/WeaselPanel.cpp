@@ -225,7 +225,10 @@ void WeaselPanel::_EnsureSkin() {
     if (m_skin_file != m_style.skin_file || !m_skin.Loaded() ||
         m_skin.dpi() != dpi) {
       m_skin_file = m_style.skin_file;
+      SogouSkin::Log(L"[panel] loading skin: " + m_style.skin_file);
       m_skin.Load(m_style.skin_file, dpi);
+      SogouSkin::Log(m_skin.Loaded() ? L"[panel] skin loaded"
+                                     : L"[panel] skin load FAILED");
     }
     if (m_skin.Loaded())
       _ApplySkinStyle();

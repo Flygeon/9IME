@@ -4,7 +4,10 @@
 
 #include <bcrypt.h>
 #include <algorithm>
+#include <fstream>
 #include <objidl.h>
+
+#include <WeaselUtility.h>
 
 #include "miniz.h"
 
@@ -140,6 +143,12 @@ bool Aes256CbcDecrypt(const std::vector<BYTE>& in, std::vector<BYTE>& out) {
 
 }  // namespace
 
+void SogouSkin::Log(const std::wstring& msg) {
+  std::wofstream out(WeaselLogPath() / L"sogou-skin.log", std::ios::app);
+  if (out)
+    out << msg << std::endl;
+}
+
 SogouSkin::SogouSkin() {}
 
 SogouSkin::~SogouSkin() {
@@ -197,8 +206,11 @@ bool SogouSkin::Extract(const std::wstring& path) {
   HANDLE h_file =
       CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL,
                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-  if (h_file == INVALID_HANDLE_VALUE)
+  if (h_file == INVALID_HANDLE_VALUE) {
+    Log(L"[skin] cannot open file, error " +
+        std::to_wstring(GetLastError()));
     return false;
+  }
   LARGE_INTEGER sz = {0};
   if (!GetFileSizeEx(h_file, &sz) || sz.QuadPart <= 0 ||
       sz.QuadPart > (64 * 1024 * 1024)) {
@@ -249,8 +261,10 @@ bool SogouSkin::Extract(const std::wstring& path) {
   // plain zip
   mz_zip_archive zip;
   memset(&zip, 0, sizeof(zip));
-  if (!mz_zip_reader_init_mem(&zip, buf.data(), buf.size(), 0))
+  if (!mz_zip_reader_init_mem(&zip, buf.data(), buf.size(), 0)) {
+    Log(L"[skin] not a valid zip archive");
     return false;
+  }
   mz_uint n = mz_zip_reader_get_num_files(&zip);
   for (mz_uint i = 0; i < n; ++i) {
     mz_zip_archive_file_stat st;
@@ -443,8 +457,10 @@ bool SogouSkin::ParseScheme(const std::wstring& section,
 
 bool SogouSkin::ParseSkinIni() {
   std::wstring ini_file = FindFile(L"skin.ini");
-  if (ini_file.empty())
+  if (ini_file.empty()) {
+    Log(L"[skin] skin.ini not found in archive");
     return false;
+  }
   std::vector<BYTE>* data = FindFileData(ini_file);
   if (!data)
     return false;
@@ -550,16 +566,29 @@ bool SogouSkin::ParseSkinIni() {
 
 bool SogouSkin::Load(const std::wstring& path, UINT dpi) {
   Unload();
-  if (path.empty())
+  if (path.empty()) {
+    Log(L"[skin] Load: empty path");
     return false;
+  }
   dpi_ = dpi > 0 ? dpi : 96;
-  if (!Extract(path))
+  Log(L"[skin] Load: " + path + L" (dpi " + std::to_wstring(dpi_) + L")");
+  if (!Extract(path)) {
+    Log(L"[skin] Extract failed for: " + path);
     return false;
-  if (!ParseSkinIni())
+  }
+  Log(L"[skin] Extract ok, " + std::to_wstring(files_.size()) +
+      L" entries");
+  if (!ParseSkinIni()) {
+    Log(L"[skin] ParseSkinIni failed (skin.ini missing or no images)");
     return false;
-  if (!h_.pic && !v_.pic && !bar_pic_)
+  }
+  if (!h_.pic && !v_.pic && !bar_pic_) {
+    Log(L"[skin] no usable scheme images (H1/V1/StatusBar all missing)");
     return false;
+  }
   loaded_ = true;
+  Log(L"[skin] loaded ok: name=" + name_ + L" font=" + font_name_ +
+      L" size=" + std::to_wstring(font_size_));
   return true;
 }
 

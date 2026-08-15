@@ -43,6 +43,8 @@ class SogouSkin {
   // Load a .ssf file (zip or encrypted container). dpi is used to scale
   // layout values and drawing. Returns true when the skin becomes usable.
   bool Load(const std::wstring& path, UINT dpi);
+  // Append a line to %TEMP%\rime.9ime\sogou-skin.log (diagnostics).
+  static void Log(const std::wstring& msg);
   void Unload();
   bool Loaded() const { return loaded_; }
   UINT dpi() const { return dpi_; }
