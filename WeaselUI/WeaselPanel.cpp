@@ -1192,7 +1192,7 @@ void WeaselPanel::DoPaint(CDCHandle dc) {
         // 9IME: draw the Sogou skin background (9-grid stretched)
         const SogouSkin::Scheme& sc = skin_vertical ? m_skin.vertical()
                                                     : m_skin.horizontal();
-        SogouSkin::Log(L"[paint] drawing skin background, win=" +
+        SogouSkin::Log(L"[paint] skin bg, win=" +
                        std::to_wstring(rcw.Width()) + L"x" +
                        std::to_wstring(rcw.Height()) + L" img=" +
                        std::to_wstring(sc.img_w) + L"x" +
@@ -1201,6 +1201,15 @@ void WeaselPanel::DoPaint(CDCHandle dc) {
         m_skin.DrawSeparator(memDC, rcw, sc,
                              MulDiv(m_skin.font_size(), 4, 3));
       } else {
+        SogouSkin::Log(
+            L"[paint] FALLBACK loaded=" +
+            std::to_wstring(m_skin.Loaded() ? 1 : 0) +
+            L" hasScheme=" +
+            std::to_wstring(m_skin.HasScheme(skin_vertical) ? 1 : 0) +
+            L" skin_vertical=" + std::to_wstring(skin_vertical ? 1 : 0) +
+            L" layout=" + std::to_wstring(m_style.layout_type) +
+            L" ctxEmpty=" + std::to_wstring(m_ctx.empty() ? 1 : 0) +
+            L" inline=" + std::to_wstring(m_style.inline_preedit ? 1 : 0));
         _HighlightText(memDC, backrc, m_style.back_color,
                        m_style.shadow_color,
                        DPI_SCALE(m_style.round_corner_ex), BackType::BACKGROUND,
