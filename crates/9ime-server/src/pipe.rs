@@ -103,6 +103,7 @@ pub fn serve(
             // Shutdown is answered as Ok; detect via the request itself.
             if is_shutdown {
                 shutdown = true;
+                ui.lock().unwrap().quit = true;
                 break;
             }
         }

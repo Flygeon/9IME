@@ -22,8 +22,9 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect,
-    GetMessageW, IsWindowVisible, LoadCursorW, MoveWindow, PostQuitMessage,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+    GetClientRect, IsWindowVisible, LoadCursorW, MoveWindow, PeekMessageW,
+    PostQuitMessage, PM_REMOVE,
     RegisterClassW, SetWindowPos, ShowWindow, WNDCLASSW, CS_HREDRAW,
     CS_VREDRAW, HTCAPTION, HWND_TOPMOST, IDC_ARROW, MSG, SWP_NOACTIVATE,
     SWP_NOMOVE, SWP_SHOWWINDOW, SW_SHOWNOACTIVATE, SW_HIDE, WM_DESTROY,
@@ -281,12 +282,18 @@ fn ui_thread(ui: Arc<Mutex<UiState>>, changed: Arc<AtomicBool>) {
         let mut last_skin = String::new();
         let mut msg = MSG::default();
         loop {
-            while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
                 DispatchMessageW(&msg);
                 if msg.message == WM_DESTROY {
                     let _ = DeleteDC(hmem);
                     return;
                 }
+            }
+            // the pipe thread sets quit on shutdown
+            if ui.lock().map(|s| s.quit).unwrap_or(false) {
+                let _ = DestroyWindow(hwnd);
+                let _ = DeleteDC(hmem);
+                return;
             }
             if changed.swap(false, Ordering::Relaxed) {
                 let (visible, ax, ay, ctx, skin_name, skin) = {

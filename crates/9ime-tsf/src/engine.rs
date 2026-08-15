@@ -58,10 +58,35 @@ pub fn on_focus(focused: bool) {
     });
 }
 
+/// Convert a Windows VK code + shift state into a librime keycode
+/// (ASCII for printable keys, X11 keysyms for navigation).
+fn vk_to_rime(vk: u32, shift: bool) -> u32 {
+    match vk {
+        0x20 => 0x20, // space
+        0x0D => 0x0D, // return
+        0x08 => 0x08, // backspace
+        0x09 => 0x09, // tab
+        0x1B => 0x1B, // escape
+        0x21 => 0xFF55, // page up
+        0x22 => 0xFF56, // page down
+        0x25 => 0xFF51, // left
+        0x26 => 0xFF52, // up
+        0x27 => 0xFF53, // right
+        0x28 => 0xFF54, // down
+        0x30..=0x39 => vk, // digits
+        0x41..=0x5A => {
+            if shift { vk } else { vk + 0x20 }
+        }
+        _ => vk,
+    }
+}
+
 pub fn process_key(ke: &KeyEvent) -> EngineOutput {
     let (ax, ay) = crate::ipc::current_anchor();
+    let shifted = ke.mask & MASK_SHIFT != 0;
+    let keycode = vk_to_rime(ke.keycode, shifted);
     let req = Request::ProcessKey {
-        keycode: ke.keycode,
+        keycode,
         mask: ke.mask,
         anchor_x: ax,
         anchor_y: ay,
