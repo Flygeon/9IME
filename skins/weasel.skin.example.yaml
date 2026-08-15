@@ -1,0 +1,12 @@
+# weasel.yaml - 9IME 配置示例
+# 将本文件内容合并到 %AppData%\Rime\weasel.yaml 中
+
+patch:
+  # 使用搜狗皮肤：把 .ssf 文件放入 %AppData%\Rime 后，指定文件名即可
+  style/skin: "sample.ssf"
+
+  # 皮肤模式下以下设置会被皮肤覆盖（字体、颜色、边距等）
+  # 布局仍可指定：horizontal（横排，默认）或 vertical（竖排）
+  style/horizontal: true
+
+  # 恢复默认配色界面：删除上面的 style/skin 配置并重新部署
