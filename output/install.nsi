@@ -1,4 +1,4 @@
-; 9IME installation script
+﻿; 9IME installation script
 !include FileFunc.nsh
 !include LogicLib.nsh
 !include MUI2.nsh
