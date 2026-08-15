@@ -485,13 +485,22 @@ bool SogouSkin::ParseSkinIni() {
   candidate_color_ = GetColor(L"Display", L"zhongwen_color", candidate_color_);
 
   // schemes
-  ParseScheme(L"Scheme_H1", h_, L"");
-  ParseScheme(L"Scheme_V1", v_, L"");
+  bool h1_ok = ParseScheme(L"Scheme_H1", h_, L"");
+  bool v1_ok = ParseScheme(L"Scheme_V1", v_, L"");
+  Log(L"[skin] Scheme_H1 pic: " + (h1_ok ? std::to_wstring(h_.img_w) +
+                                       L"x" + std::to_wstring(h_.img_h)
+                                       : L"MISSING"));
+  Log(L"[skin] Scheme_V1 pic: " + (v1_ok ? std::to_wstring(v_.img_w) +
+                                       L"x" + std::to_wstring(v_.img_h)
+                                       : L"MISSING"));
   // optional second-scheme highlight images
   h_.preedit_highlight = LoadBitmap(GetString(L"Scheme_H2", L"pinyin_pic"));
   h_.candidate_highlight = LoadBitmap(GetString(L"Scheme_H2", L"zhongwen_pic"));
   v_.preedit_highlight = LoadBitmap(GetString(L"Scheme_V2", L"pinyin_pic"));
   v_.candidate_highlight = LoadBitmap(GetString(L"Scheme_V2", L"zhongwen_pic"));
+  Log(L"[skin] H2 highlight: " +
+      (h_.candidate_highlight ? L"ok" : L"none") + L", V2 highlight: " +
+      (v_.candidate_highlight ? L"ok" : L"none"));
 
   // fallback background color: average color of the stretch region
   {
