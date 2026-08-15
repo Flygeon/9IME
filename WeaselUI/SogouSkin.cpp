@@ -144,9 +144,13 @@ bool Aes256CbcDecrypt(const std::vector<BYTE>& in, std::vector<BYTE>& out) {
 }  // namespace
 
 void SogouSkin::Log(const std::wstring& msg) {
-  std::wofstream out(WeaselLogPath() / L"sogou-skin.log", std::ios::app);
-  if (out)
-    out << msg << std::endl;
+  // write UTF-8 bytes so CJK file names survive the log
+  std::ofstream out(WeaselLogPath() / L"sogou-skin.log",
+                    std::ios::app | std::ios::binary);
+  if (out) {
+    std::string u8 = wtou8(msg);
+    out << u8 << "\r\n";
+  }
 }
 
 SogouSkin::SogouSkin() {}

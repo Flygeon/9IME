@@ -2,6 +2,7 @@
 
 #include "resource.h"
 #include "UIStyleSettings.h"
+#include <vector>
 
 class UIStyleSettingsDialog : public CDialogImpl<UIStyleSettingsDialog> {
  public:
@@ -16,15 +17,25 @@ class UIStyleSettingsDialog : public CDialogImpl<UIStyleSettingsDialog> {
   MESSAGE_HANDLER(WM_CLOSE, OnClose)
   COMMAND_ID_HANDLER(IDOK, OnOK)
   COMMAND_HANDLER(IDC_COLOR_SCHEME, LBN_SELCHANGE, OnColorSchemeSelChange)
+  COMMAND_ID_HANDLER(IDC_IMPORT_SKIN, OnImportSkin)
+  COMMAND_ID_HANDLER(IDC_REMOVE_SKIN, OnRemoveSkin)
+  COMMAND_HANDLER(IDC_SKIN_COMBO, CBN_SELCHANGE, OnSkinSelChange)
   END_MSG_MAP()
 
   LRESULT OnInitDialog(UINT, WPARAM, LPARAM, BOOL&);
   LRESULT OnClose(UINT, WPARAM, LPARAM, BOOL&);
   LRESULT OnOK(WORD, WORD code, HWND, BOOL&);
   LRESULT OnColorSchemeSelChange(WORD, WORD, HWND, BOOL&);
+  LRESULT OnImportSkin(WORD, WORD, HWND, BOOL&);
+  LRESULT OnRemoveSkin(WORD, WORD, HWND, BOOL&);
+  LRESULT OnSkinSelChange(WORD, WORD, HWND, BOOL&);
 
   void Populate();
   void Preview(int index);
+  // 9IME: Sogou skin (.ssf) management
+  void PopulateSkins();
+  void SelectSkin(const std::wstring& file_name);
+  bool ApplySkinSelection();
 
   UIStyleSettings* settings_;
   bool loaded_;
@@ -34,4 +45,11 @@ class UIStyleSettingsDialog : public CDialogImpl<UIStyleSettingsDialog> {
   CStatic preview_;
   CImage image_;
   CButton select_font_;
+  // 9IME: skin controls
+  CComboBox skin_list_;
+  CButton import_skin_;
+  CButton remove_skin_;
+  std::vector<std::wstring> skin_files_;
+  bool skin_changed_;
+  int skin_pending_;  // combo selection at OK time; 0 = no skin
 };

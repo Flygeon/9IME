@@ -45,6 +45,9 @@
 #define IDC_COLOR_SCHEME                1004
 #define IDC_SELECT_FONT                 1005
 #define IDC_PREVIEW                     1006
+#define IDC_SKIN_COMBO                  1012
+#define IDC_IMPORT_SKIN                 1013
+#define IDC_REMOVE_SKIN                 1014
 #define IDC_USER_DICT_LIST              1007
 #define IDC_BACKUP                      1008
 #define IDC_RESTORE                     1009
