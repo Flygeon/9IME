@@ -5,6 +5,7 @@
 
 mod engine;
 mod factory;
+mod ipc;
 mod register;
 mod service;
 

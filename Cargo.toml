@@ -5,6 +5,8 @@ members = [
   "crates/9ime-core",
   "crates/9ime-console",
   "crates/9ime-tsf",
+  "crates/9ime-ipc",
+  "crates/9ime-server",
 ]
 
 [workspace.package]

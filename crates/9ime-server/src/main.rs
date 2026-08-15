@@ -1,0 +1,162 @@
+//! 9IME server: owns librime + the candidate window; serves the TSF client
+//! over a named pipe. One session, driven from one thread (librime rule).
+
+use std::ffi::CString;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
+
+use nineime_ipc::{ContextMsg, MenuMsg, StatusMsg};
+use nineime_librime::{ffi::RimeTraits, Rime};
+
+mod pipe;
+mod window;
+
+/// State shared with the UI thread (candidate window).
+pub struct UiState {
+    pub context: ContextMsg,
+    pub status: StatusMsg,
+    pub visible: bool,
+    pub anchor_x: i32,
+    pub anchor_y: i32,
+}
+
+impl UiState {
+    pub fn new() -> Self {
+        UiState {
+            context: ContextMsg::default(),
+            status: StatusMsg::default(),
+            visible: false,
+            anchor_x: 0,
+            anchor_y: 0,
+        }
+    }
+}
+
+pub fn exe_dir() -> PathBuf {
+    let mut buf = vec![0u16; 2048];
+    let n = unsafe {
+        windows::Win32::System::LibraryLoader::GetModuleFileNameW(None, &mut buf)
+    };
+    buf.truncate(n as usize);
+    let p = String::from_utf16_lossy(&buf);
+    Path::new(&p).parent().map(|d| d.to_path_buf()).unwrap_or_default()
+}
+
+pub fn appdata_dir() -> PathBuf {
+    let base = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
+    Path::new(&base).join("9IME")
+}
+
+pub fn cstr(s: &str) -> CString {
+    CString::new(s).expect("interior NUL")
+}
+
+pub fn context_msg(ctx: &nineime_librime::Context) -> ContextMsg {
+    let composition = ctx.composition.as_ref();
+    ContextMsg {
+        composing: composition.is_some(),
+        preedit: composition.map(|c| c.preedit.clone()).unwrap_or_default(),
+        cursor: composition.map(|c| c.cursor_pos).unwrap_or(0),
+        menu: MenuMsg {
+            page_size: ctx.menu.page_size,
+            page_no: ctx.menu.page_no,
+            is_last_page: ctx.menu.is_last_page,
+            highlighted: ctx.menu.highlighted_candidate_index,
+            candidates: ctx
+                .menu
+                .candidates
+                .iter()
+                .map(|c| nineime_ipc::CandidateMsg {
+                    text: c.text.clone(),
+                    comment: c.comment.clone(),
+                })
+                .collect(),
+            select_keys: ctx.menu.select_keys.clone(),
+        },
+        commit_text_preview: ctx.commit_text_preview.clone(),
+    }
+}
+
+pub fn status_msg(st: &nineime_librime::Status) -> StatusMsg {
+    StatusMsg {
+        schema_id: st.schema_id.clone(),
+        schema_name: st.schema_name.clone(),
+        ascii_mode: st.is_ascii_mode,
+        composing: st.is_composing,
+        disabled: st.is_disabled,
+    }
+}
+
+fn main() {
+    let base = exe_dir();
+    let dll = base.join("rime.dll");
+    let shared = base.clone();
+    let user = appdata_dir();
+    let _ = std::fs::create_dir_all(&user);
+
+    println!("9IME server: rime.dll = {}", dll.display());
+    println!("9IME server: shared data = {}", shared.display());
+    println!("9IME server: user data = {}", user.display());
+
+    let rime = match Rime::load(&dll) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("server: cannot load librime: {e}");
+            std::process::exit(1);
+        }
+    };
+    let version = rime.version().unwrap_or_default();
+    println!("server: librime {version}");
+
+    // traits must outlive initialize.
+    let shared_c = cstr(&shared.to_string_lossy());
+    let user_c = cstr(&user.to_string_lossy());
+    let app_c = cstr("rime.9ime");
+    let mut traits = RimeTraits::default();
+    traits.shared_data_dir = shared_c.as_ptr();
+    traits.user_data_dir = user_c.as_ptr();
+    traits.app_name = app_c.as_ptr();
+    traits.min_log_level = 1;
+
+    if let Err(e) = rime.initialize(&traits) {
+        eprintln!("server: initialize failed: {e}");
+        std::process::exit(1);
+    }
+
+    // deploy on first run (build dir missing)
+    let build_dir = user.join("build");
+    if !build_dir.join("default.yaml").exists() {
+        println!("server: first run, deploying...");
+        match rime.deploy(true) {
+            Ok(ok) => println!("server: deploy ok={ok}"),
+            Err(e) => eprintln!("server: deploy failed: {e}"),
+        }
+    } else {
+        // lightweight maintenance check (merges user config changes)
+        let _ = rime.deploy(false);
+    }
+
+    // one session, used only on this thread
+    let mut sess = match rime.create_session() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("server: create_session failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    let schema = sess.current_schema().unwrap_or_default();
+    println!("server: session {}, schema {}", sess.id, schema);
+
+    let ui = Arc::new(Mutex::new(UiState::new()));
+    let changed = Arc::new(AtomicBool::new(false));
+    let win = window::CandidateWindow::spawn(ui.clone(), changed.clone());
+    println!("server: candidate window thread started");
+
+    pipe::serve(&rime, &mut sess, ui.clone(), changed.clone());
+
+    let _ = sess.destroy();
+    let _ = rime.finalize();
+    let _ = win.join();
+    println!("server: exit");
+}

@@ -172,7 +172,7 @@ impl KeyEventSink {
         let keycode = wparam.0 as u32;
         let mask = engine::current_mask();
         let ke = engine::KeyEvent { keycode, mask };
-        match engine::process(&ke) {
+        match engine::process_key(&ke) {
             engine::EngineOutput::Passthrough => Ok(false),
             engine::EngineOutput::Handled { commit } => {
                 if let Some(text) = commit {
@@ -199,7 +199,8 @@ impl KeyEventSink {
 }
 
 impl ITfKeyEventSink_Impl for KeyEventSink_Impl {
-    fn OnSetFocus(&self, _fforeground: BOOL) -> Result<()> {
+    fn OnSetFocus(&self, fforeground: BOOL) -> Result<()> {
+        crate::engine::on_focus(fforeground.as_bool());
         Ok(())
     }
 

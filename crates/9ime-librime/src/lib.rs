@@ -308,6 +308,12 @@ impl RimeSession {
         (unsafe { f(self.id, index) }) != 0
     }
 
+    pub fn change_page(&self, backward: bool) -> bool {
+        let Some(f) = self.rime().api().change_page else { return false };
+        // SAFETY: single-threaded session use.
+        (unsafe { f(self.id, if backward { 1 } else { 0 }) }) != 0
+    }
+
     pub fn select_schema(&self, schema_id: &str) -> bool {
         let Some(f) = self.rime().api().select_schema else { return false };
         let s = cstring(schema_id);

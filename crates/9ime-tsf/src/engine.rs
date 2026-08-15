@@ -1,7 +1,12 @@
-//! M2 placeholder engine: passthrough that commits printable ASCII.
-//! Replaced by the librime engine + named-pipe IPC in M3.
+//! Engine client (M3): forwards keys to nineime-server over the named pipe.
+//! The server owns librime and renders the candidate window.
 
+use std::sync::{Mutex, OnceLock};
+
+use nineime_ipc::{Request, Response};
 use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
+
+use crate::ipc::Client;
 
 pub struct KeyEvent {
     pub keycode: u32,
@@ -37,25 +42,46 @@ pub fn current_mask() -> u32 {
     m
 }
 
-pub fn process(ke: &KeyEvent) -> EngineOutput {
-    if ke.mask & (MASK_CTRL | MASK_ALT) != 0 {
-        return EngineOutput::Passthrough;
-    }
-    let kc = ke.keycode;
-    if (0x30..=0x39).contains(&kc) {
-        let ch = (kc - 0x30) as u8 as char;
-        return EngineOutput::Handled { commit: Some(ch.to_string()) };
-    }
-    if (0x41..=0x5a).contains(&kc) {
-        let ch = if ke.mask & MASK_SHIFT != 0 {
-            kc as u8 as char
-        } else {
-            (kc + 0x20) as u8 as char
-        };
-        return EngineOutput::Handled { commit: Some(ch.to_string()) };
-    }
-    match kc {
-        0x20 => EngineOutput::Handled { commit: Some(" ".to_string()) },
-        _ => EngineOutput::Passthrough,
-    }
+static CLIENT: OnceLock<Mutex<Option<Client>>> = OnceLock::new();
+
+fn with_client<T>(f: impl FnOnce(&mut Option<Client>) -> T) -> T {
+    let c = CLIENT.get_or_init(|| Mutex::new(None));
+    let mut guard = c.lock().unwrap();
+    f(&mut guard)
+}
+
+pub fn on_focus(focused: bool) {
+    with_client(|c| {
+        if let Some(cl) = c {
+            let _ = cl.request(&Request::Focus { focused });
+        }
+    });
+}
+
+pub fn process_key(ke: &KeyEvent) -> EngineOutput {
+    let (ax, ay) = crate::ipc::current_anchor();
+    let req = Request::ProcessKey {
+        keycode: ke.keycode,
+        mask: ke.mask,
+        anchor_x: ax,
+        anchor_y: ay,
+    };
+    with_client(|c| {
+        if c.is_none() {
+            *c = Client::connect();
+        }
+        match c.as_ref().and_then(|cl| cl.request(&req)) {
+            Some(Response::KeyResult { handled, commit, .. }) => {
+                if handled {
+                    EngineOutput::Handled { commit }
+                } else {
+                    EngineOutput::Passthrough
+                }
+            }
+            _ => {
+                *c = None;
+                EngineOutput::Passthrough
+            }
+        }
+    })
 }

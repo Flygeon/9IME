@@ -1,27 +1,22 @@
 [package]
-name = "nineime-tsf"
+name = "nineime-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[lib]
-crate-type = ["cdylib"]
-
 [dependencies]
+nineime-librime = { path = "../9ime-librime" }
+nineime-ipc = { path = "../9ime-ipc" }
 windows = { version = "0.62", features = [
   "Win32_Foundation",
-  "Win32_System_Com",
+  "Win32_Graphics_Gdi",
   "Win32_Security",
   "Win32_Storage_FileSystem",
   "Win32_System_IO",
   "Win32_System_LibraryLoader",
+  "Win32_System_Pipes",
   "Win32_System_Threading",
-  "Win32_System_Registry",
-  "Win32_UI_TextServices",
+  "Win32_UI_HiDpi",
   "Win32_UI_WindowsAndMessaging",
-  "Win32_UI_Input_KeyboardAndMouse",
 ] }
-# The #[implement] macro generates `::windows_core` paths; keep the crate
-# in the extern prelude with that name.
 windows-core = { version = "0.62.2" }
-nineime-ipc = { path = "../9ime-ipc" }
