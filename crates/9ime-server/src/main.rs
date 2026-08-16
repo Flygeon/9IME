@@ -23,6 +23,8 @@ pub struct UiState {
     pub anchor_y: i32,
     pub skin: Option<nineime_core::skin::Skin>,
     pub loaded_skin: String,
+    /// Candidate window orientation: "vertical" | "horizontal".
+    pub layout: String,
     pub quit: bool,
 }
 
@@ -36,6 +38,7 @@ impl UiState {
             anchor_y: 0,
             skin: None,
             loaded_skin: String::new(),
+            layout: String::new(),
             quit: false,
         }
     }

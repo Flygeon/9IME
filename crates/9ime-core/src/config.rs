@@ -15,9 +15,21 @@ pub fn skins_dir() -> PathBuf {
     appdata_dir().join("skins")
 }
 
+/// Candidate-window orientation.
+pub const LAYOUT_VERTICAL: &str = "vertical";
+pub const LAYOUT_HORIZONTAL: &str = "horizontal";
+
 #[derive(Debug, Clone, Default)]
 pub struct Config {
     pub skin: String,
+    /// Candidate window layout: "vertical" (default) or "horizontal".
+    pub layout: String,
+}
+
+impl Config {
+    pub fn is_horizontal(&self) -> bool {
+        self.layout == LAYOUT_HORIZONTAL
+    }
 }
 
 /// Read the config file. Missing/broken files yield the default config.
@@ -27,21 +39,26 @@ pub fn load() -> Config {
         return Config::default();
     };
     let mut cfg = Config::default();
-    // tiny JSON parser: {"skin": "x.ssf"}
+    // tiny JSON parser: {"skin": "x.ssf", "layout": "vertical"}
     if let Some(open) = text.find("{") {
         let body = &text[open + 1..];
         if let Some(close) = body.find("}") {
             let body = &body[..close];
             for part in body.split(",") {
                 if let Some(eq) = part.find(":") {
-                    let key = part[..eq].trim().trim_start_matches("\"").trim_end_matches("\"");
-                    let value = part[eq + 1..].trim().trim_start_matches("\"").trim_end_matches("\"");
-                    if key == "skin" {
-                        cfg.skin = value.to_string();
+                    let key = part[..eq].trim().trim_start_matches('"').trim_end_matches('"');
+                    let value = part[eq + 1..].trim().trim_start_matches('"').trim_end_matches('"');
+                    match key {
+                        "skin" => cfg.skin = value.to_string(),
+                        "layout" => cfg.layout = value.to_string(),
+                        _ => {}
                     }
                 }
             }
         }
+    }
+    if cfg.layout.is_empty() {
+        cfg.layout = LAYOUT_VERTICAL.to_string();
     }
     cfg
 }
@@ -49,6 +66,7 @@ pub fn load() -> Config {
 /// Write the config file.
 pub fn save(cfg: &Config) -> std::io::Result<()> {
     let _ = std::fs::create_dir_all(&appdata_dir());
-    let text = format!("{{\"skin\": \"{}\"}}\n", cfg.skin);
+    let layout = if cfg.layout.is_empty() { LAYOUT_VERTICAL } else { &cfg.layout };
+    let text = format!("{{\"skin\": \"{}\", \"layout\": \"{}\"}}\n", cfg.skin, layout);
     std::fs::write(config_path(), text)
 }

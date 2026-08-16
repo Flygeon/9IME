@@ -1,10 +1,14 @@
 //! Candidate window: topmost layered popup rendered with per-pixel alpha.
 //!
-//! Skin PNGs (background / highlight) are decoded once and 9-sliced into a
-//! premultiplied BGRA frame buffer by our own compositor, so rounded
+//! Skin PNGs/BMPs (background / highlight) are decoded once and 9-sliced into
+//! a premultiplied BGRA frame buffer by our own compositor, so rounded
 //! corners and shadows keep their transparency. Text is drawn with GDI on
 //! top; a small alpha-repair pass inside the text rectangles keeps the
 //! glyphs opaque (GDI may zero the alpha byte of pixels it touches).
+//!
+//! Supports two candidate layouts: vertical (one candidate per row) and
+//! horizontal (candidates in a single row). Each layout picks the matching
+//! skin scheme (Scheme_V1/V2 for vertical, Scheme_H1/H2 for horizontal).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -135,33 +139,6 @@ fn decode_png(data: &[u8]) -> Option<(i32, i32, Vec<u8>)> {
     Some((info.width as i32, info.height as i32, out))
 }
 
-/// RGBA -> premultiplied BGRA pixel buffer.
-fn to_img(w: i32, h: i32, rgba: &[u8]) -> Option<Img> {
-    if w <= 0 || h <= 0 {
-        return None;
-    }
-    let mut px = Vec::with_capacity(rgba.len());
-    for p in rgba.chunks_exact(4) {
-        let a = p[3] as u32;
-        px.push(((p[2] as u32 * a + 127) / 255) as u8);
-        px.push(((p[1] as u32 * a + 127) / 255) as u8);
-        px.push(((p[0] as u32 * a + 127) / 255) as u8);
-        px.push(p[3]);
-    }
-    Some(Img { w, h, px })
-}
-
-fn load_img(bytes: &Option<Vec<u8>>) -> Option<Img> {
-    let bytes = bytes.as_ref()?;
-    if let Some((w, h, rgba)) = decode_png(bytes) {
-        return to_img(w, h, &rgba);
-    }
-    if let Some((w, h, rgba)) = decode_bmp(bytes) {
-        return to_img(w, h, &rgba);
-    }
-    None
-}
-
 /// Minimal decoder for uncompressed 24/32bpp Windows BMPs (BI_RGB), the
 /// format Sogou skins use for their highlight / status-bar images.
 fn decode_bmp(data: &[u8]) -> Option<(i32, i32, Vec<u8>)> {
@@ -203,8 +180,6 @@ fn decode_bmp(data: &[u8]) -> Option<(i32, i32, Vec<u8>)> {
             rgba[di] = r;
             rgba[di + 1] = g;
             rgba[di + 2] = b;
-            // 32bpp BMPs often leave the alpha byte zero (unused); treat an
-            // all-zero alpha image as fully opaque.
             rgba[di + 3] = a;
         }
     }
@@ -219,8 +194,39 @@ fn decode_bmp(data: &[u8]) -> Option<(i32, i32, Vec<u8>)> {
     Some((width, h, rgba))
 }
 
-fn build_skin_gfx(sk: &nineime_core::skin::Skin) -> SkinGfx {
-    let sc = &sk.scheme;
+/// RGBA -> premultiplied BGRA pixel buffer.
+fn to_img(w: i32, h: i32, rgba: &[u8]) -> Option<Img> {
+    if w <= 0 || h <= 0 {
+        return None;
+    }
+    let mut px = Vec::with_capacity(rgba.len());
+    for p in rgba.chunks_exact(4) {
+        let a = p[3] as u32;
+        px.push(((p[2] as u32 * a + 127) / 255) as u8);
+        px.push(((p[1] as u32 * a + 127) / 255) as u8);
+        px.push(((p[0] as u32 * a + 127) / 255) as u8);
+        px.push(p[3]);
+    }
+    Some(Img { w, h, px })
+}
+
+fn load_img(bytes: &Option<Vec<u8>>) -> Option<Img> {
+    let bytes = bytes.as_ref()?;
+    if let Some((w, h, rgba)) = decode_png(bytes) {
+        return to_img(w, h, &rgba);
+    }
+    if let Some((w, h, rgba)) = decode_bmp(bytes) {
+        return to_img(w, h, &rgba);
+    }
+    None
+}
+
+fn build_skin_gfx(sk: &nineime_core::skin::Skin, horizontal: bool) -> SkinGfx {
+    let primary = if horizontal { &sk.scheme } else { &sk.scheme_vertical };
+    let alt = if horizontal { &sk.scheme_vertical } else { &sk.scheme };
+    // If the selected orientation has no background but the other does,
+    // reuse it rather than falling back to a flat box.
+    let sc = if primary.pic.is_none() && alt.pic.is_some() { alt } else { primary };
     SkinGfx {
         bg: load_img(&sc.pic),
         hl: load_img(&sc.candidate_highlight),
@@ -430,7 +436,6 @@ fn ui_thread(ui: Arc<Mutex<UiState>>, changed: Arc<AtomicBool>) {
         };
         if RegisterClassW(&wc) == 0 {
             let err = windows::Win32::Foundation::GetLastError().0;
-            // 1410 = ERROR_CLASS_ALREADY_EXISTS is fine on re-registration
             if err != 1410 {
                 crate::slog::log(&format!("RegisterClassW failed: {err}"));
             }
@@ -458,6 +463,7 @@ fn ui_thread(ui: Arc<Mutex<UiState>>, changed: Arc<AtomicBool>) {
         };
 
         let mut last_skin = String::new();
+        let mut last_horizontal: Option<bool> = None;
         let mut gfx: Option<SkinGfx> = None;
         let mut msg = MSG::default();
         loop {
@@ -472,7 +478,7 @@ fn ui_thread(ui: Arc<Mutex<UiState>>, changed: Arc<AtomicBool>) {
                 return;
             }
             if changed.swap(false, Ordering::Relaxed) {
-                let (visible, ax, ay, frame, skin_name, skin) = {
+                let (visible, ax, ay, frame, skin_name, skin, layout) = {
                     let s = ui.lock().unwrap();
                     (
                         s.visible,
@@ -481,13 +487,16 @@ fn ui_thread(ui: Arc<Mutex<UiState>>, changed: Arc<AtomicBool>) {
                         build_frame(&s.context),
                         s.loaded_skin.clone(),
                         s.skin.clone(),
+                        s.layout.clone(),
                     )
                 };
-                if last_skin != skin_name {
+                let horizontal = layout == nineime_core::config::LAYOUT_HORIZONTAL;
+                if last_skin != skin_name || last_horizontal != Some(horizontal) {
                     last_skin = skin_name;
-                    gfx = skin.as_ref().map(build_skin_gfx);
+                    last_horizontal = Some(horizontal);
+                    gfx = skin.as_ref().map(|s| build_skin_gfx(s, horizontal));
                 }
-                present(hwnd, visible, ax, ay, &frame, gfx.as_ref());
+                present(hwnd, visible, ax, ay, &frame, gfx.as_ref(), horizontal);
             }
             std::thread::sleep(std::time::Duration::from_millis(8));
         }
@@ -529,7 +538,15 @@ fn build_frame(ctx: &nineime_ipc::ContextMsg) -> Frame {
     }
 }
 
-fn present(hwnd: HWND, visible: bool, ax: i32, ay: i32, frame: &Frame, gfx: Option<&SkinGfx>) {
+fn present(
+    hwnd: HWND,
+    visible: bool,
+    ax: i32,
+    ay: i32,
+    frame: &Frame,
+    gfx: Option<&SkinGfx>,
+    horizontal: bool,
+) {
     unsafe {
         let Some(cache) = CACHE.get() else { return };
         let mut cache = cache.lock().unwrap();
@@ -567,25 +584,111 @@ fn present(hwnd: HWND, visible: bool, ax: i32, ay: i32, frame: &Frame, gfx: Opti
         let m = measure(hdc_screen, frame, scale);
         let line_h = m.line_h;
 
-        // layout
         let has_preedit = frame.lines.first().map(|l| l.kind) == Some(LineKind::Preedit);
-        let mut content_w = 0i32;
-        for (i, line) in frame.lines.iter().enumerate() {
-            let w = m.widths[i]
-                + if line.kind == LineKind::Preedit { pe_l + pe_r } else { ca_l + ca_r };
-            content_w = content_w.max(w);
-        }
-        content_w = content_w.max(sc(60));
-        let n_cand = frame.lines.len() as i32 - if has_preedit { 1 } else { 0 };
-        let win_w = content_w;
-        let win_h = if has_preedit {
-            pe_t + line_h + gap + line_h * n_cand + ca_b
+        let n_cand = frame.lines.len() - if has_preedit { 1 } else { 0 };
+        let cell_pad = sc(4);
+
+        // ---- compute content size ----
+        let (content_w, content_h) = if horizontal {
+            let mut cand_row_w = ca_l + ca_r;
+            for (i, line) in frame.lines.iter().enumerate() {
+                if matches!(line.kind, LineKind::Candidate(_)) {
+                    cand_row_w += m.widths[i] + cell_pad * 2;
+                }
+            }
+            let preedit_w = if has_preedit { m.widths[0] + pe_l + pe_r } else { 0 };
+            let cw = preedit_w.max(cand_row_w).max(sc(60));
+            let ch = (if has_preedit { pe_t + line_h + gap } else { sc(3) }) + line_h + ca_b;
+            (cw, ch)
         } else {
-            sc(3) + line_h * n_cand + ca_b
+            let mut cw = 0i32;
+            for (i, line) in frame.lines.iter().enumerate() {
+                let w = m.widths[i]
+                    + if line.kind == LineKind::Preedit { pe_l + pe_r } else { ca_l + ca_r };
+                cw = cw.max(w);
+            }
+            let ch = (if has_preedit { pe_t } else { sc(3) })
+                + line_h
+                + (if has_preedit { gap } else { 0 })
+                + line_h * (n_cand as i32).max(0)
+                + ca_b;
+            (cw.max(sc(60)), ch)
         };
+
+        // proportion fix: never smaller than the skin's natural (DPI-scaled)
+        // size, so the skin image is not squished into a distorted window.
+        let mut win_w = content_w;
+        let mut win_h = content_h;
+        if let Some(g) = gfx {
+            if let Some(bg) = &g.bg {
+                win_w = win_w.max((bg.w as f32 * scale) as i32);
+                win_h = win_h.max((bg.h as f32 * scale) as i32);
+            }
+        }
         let (w, h) = (win_w as usize, win_h as usize);
 
-        // compose the background / highlight pixels
+        // ---- build text jobs, highlight rects, separator ----
+        let mut text_jobs: Vec<(i32, i32, String, u32)> = Vec::new();
+        let mut hl_rects: Vec<(i32, i32, i32, i32)> = Vec::new();
+        let mut sep: Option<(i32, i32, i32)> = None; // (y, x, width)
+
+        let cand_color = gfx.map(|g| g.cand_color).unwrap_or(FB_TEXT);
+        let hl_color = gfx.map(|g| g.hl_color).unwrap_or(FB_TEXT);
+        let preedit_color = gfx.map(|g| g.preedit_color).unwrap_or(FB_PREEDIT);
+
+        if horizontal {
+            let mut y = if has_preedit { pe_t } else { sc(3) };
+            if has_preedit {
+                text_jobs.push((pe_l, y, frame.lines[0].text.clone(), preedit_color));
+                y += line_h + gap;
+            }
+            let crow_y = y;
+            let mut x = ca_l;
+            for (i, line) in frame.lines.iter().enumerate() {
+                if let LineKind::Candidate(idx) = line.kind {
+                    let cw = m.widths[i] + cell_pad * 2;
+                    if idx == frame.hl {
+                        hl_rects.push((x, crow_y, cw, line_h));
+                    }
+                    let color = if idx == frame.hl { hl_color } else { cand_color };
+                    text_jobs.push((x + cell_pad, crow_y, line.text.clone(), color));
+                    x += cw;
+                }
+            }
+        } else {
+            let mut y = if has_preedit { pe_t } else { sc(3) };
+            for (i, line) in frame.lines.iter().enumerate() {
+                match line.kind {
+                    LineKind::Preedit => {
+                        text_jobs.push((pe_l, y, line.text.clone(), preedit_color));
+                        y += line_h;
+                        if n_cand > 0 {
+                            sep = Some((y + gap / 2, ca_l, win_w - ca_l - ca_r));
+                            y += gap;
+                        }
+                    }
+                    LineKind::Candidate(idx) => {
+                        if idx == frame.hl {
+                            hl_rects.push((ca_l, y, (win_w - ca_l - ca_r).max(0), line_h));
+                        }
+                        let color = if idx == frame.hl { hl_color } else { cand_color };
+                        text_jobs.push((ca_l, y, line.text.clone(), color));
+                        y += line_h;
+                    }
+                }
+            }
+        }
+
+        // page indicator (bottom-right)
+        if frame.page_size > 0 && (frame.page_no > 0 || !frame.is_last_page) {
+            let ind = format!("< {} >", frame.page_no + 1);
+            let wide: Vec<u16> = ind.encode_utf16().collect();
+            let mut sz = SIZE::default();
+            let _ = GetTextExtentPoint32W(hdc_screen, &wide, &mut sz);
+            text_jobs.push((win_w - pe_r - sz.cx, (win_h - line_h).max(0), ind, FB_COMMENT));
+        }
+
+        // ---- compose background ----
         let mut buf = vec![0u8; w * h * 4];
         if let Some(g) = gfx {
             if let Some(bg) = &g.bg {
@@ -598,62 +701,27 @@ fn present(hwnd: HWND, visible: bool, ax: i32, ay: i32, frame: &Frame, gfx: Opti
             fill_rect(&mut buf, w, h, 1, 1, win_w - 2, win_h - 2, FB_BG, 255);
         }
 
-        // collect text jobs: (x, y, text, color); highlight rectangles too
-        let mut text_jobs: Vec<(i32, i32, String, u32)> = Vec::new();
-        let mut y = if has_preedit { pe_t } else { sc(3) };
-        for line in frame.lines.iter() {
-            match line.kind {
-                LineKind::Preedit => {
-                    text_jobs.push((
-                        pe_l,
-                        y,
-                        line.text.clone(),
-                        gfx.map(|g| g.preedit_color).unwrap_or(FB_PREEDIT),
-                    ));
-                    if frame.page_size > 0 && (frame.page_no > 0 || !frame.is_last_page) {
-                        let ind = format!("< {} >", frame.page_no + 1);
-                        let wide: Vec<u16> = ind.encode_utf16().collect();
-                        let mut sz = SIZE::default();
-                        let _ = GetTextExtentPoint32W(hdc_screen, &wide, &mut sz);
-                        text_jobs.push((win_w - pe_r - sz.cx, y, ind, FB_COMMENT));
-                    }
-                    y += line_h;
-                    if n_cand > 0 {
-                        if let Some(sep) = gfx.and_then(|g| g.separator) {
-                            let sy = y + gap / 2;
-                            fill_rect(&mut buf, w, h, ca_l, sy, win_w - ca_l - ca_r, 1, sep, 255);
-                        }
-                        y += gap;
-                    }
-                }
-                LineKind::Candidate(idx) => {
-                    if idx == frame.hl {
-                        if let Some(g) = gfx {
-                            if let Some(hl) = &g.hl {
-                                let mg = (hl.w / 3).min(hl.h / 3).max(1);
-                                blit_nine(
-                                    &mut buf, w, h, hl, mg, mg, mg, mg,
-                                    ca_l / 2, y, win_w - ca_l / 2 - ca_r / 2, line_h,
-                                );
-                            }
-                            // no highlight image: leave the skin background as
-                            // is and only recolor the text below
-                        } else {
-                            fill_rect(&mut buf, w, h, 1, y, win_w - 2, line_h, FB_SEL_BG, 255);
-                        }
-                    }
-                    let color = if idx == frame.hl {
-                        gfx.map(|g| g.hl_color).unwrap_or(FB_TEXT)
-                    } else {
-                        gfx.map(|g| g.cand_color).unwrap_or(FB_TEXT)
-                    };
-                    text_jobs.push((ca_l, y, line.text.clone(), color));
-                    y += line_h;
-                }
+        // separator line
+        if let Some((sy, sx, swidth)) = sep {
+            if let Some(color) = gfx.and_then(|g| g.separator) {
+                fill_rect(&mut buf, w, h, sx, sy, swidth.max(0), 1, color, 255);
             }
         }
 
-        // upload pixels to a DIB and draw text with GDI
+        // highlight rectangles
+        for &(hx, hy, hw, hh) in &hl_rects {
+            if let Some(g) = gfx {
+                if let Some(hl) = &g.hl {
+                    let mg = (hl.w / 3).min(hl.h / 3).max(1);
+                    blit_nine(&mut buf, w, h, hl, mg, mg, mg, mg, hx, hy, hw, hh);
+                }
+                // no highlight image: keep skin background, recolor text only
+            } else {
+                fill_rect(&mut buf, w, h, hx, hy, hw, hh, FB_SEL_BG, 255);
+            }
+        }
+
+        // ---- upload pixels to a DIB and draw text with GDI ----
         let header = BITMAPINFOHEADER {
             biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
             biWidth: win_w,
@@ -695,11 +763,7 @@ fn present(hwnd: HWND, visible: bool, ax: i32, ay: i32, frame: &Frame, gfx: Opti
             text_rects.push((*x - 2, *ty, *x + sz.cx + 4, *ty + line_h));
         }
 
-        // Repair the alpha GDI clobbered inside the text rectangles: GDI
-        // TextOut writes RGB but leaves the 4th byte zero on 32bpp DIBs, so
-        // glyph pixels (including pure-black ones) come back with alpha=0 and
-        // vanish under per-pixel alpha blending. The content area is opaque by
-        // design, so any pixel GDI touched there must become opaque again.
+        // Repair the alpha GDI clobbered inside the text rectangles.
         let stride = w * 4;
         let frame_px = std::slice::from_raw_parts_mut(bits as *mut u8, h * stride);
         for &(rx, ry, rx1, ry1) in &text_rects {
@@ -796,4 +860,3 @@ unsafe extern "system" fn wnd_proc(
         }
     }
 }
-

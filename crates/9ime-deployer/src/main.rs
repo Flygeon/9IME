@@ -88,6 +88,7 @@ fn load_preview(ctx: &egui::Context, file: &str) -> Option<Preview> {
 struct App {
     skins: Vec<String>,
     selected: String,
+    layout: String,
     status: String,
     deploy_rx: Option<std::sync::mpsc::Receiver<String>>,
     preview: Option<Preview>,
@@ -102,6 +103,7 @@ impl App {
         let mut app = App {
             skins: list_skins(),
             selected: config::load().skin,
+            layout: config::load().layout,
             status: "就绪".to_string(),
             deploy_rx: None,
             preview: None,
@@ -110,6 +112,16 @@ impl App {
         };
         app.refresh_preview(&cc.egui_ctx);
         app
+    }
+
+    fn set_layout(&mut self, layout: &str) {
+        self.layout = layout.to_string();
+        let mut cfg = config::load();
+        cfg.layout = layout.to_string();
+        self.status = match config::save(&cfg) {
+            Ok(()) => format!("已切换为{}（下次打字生效）", if layout == config::LAYOUT_HORIZONTAL { "横排" } else { "竖排" }),
+            Err(e) => format!("保存配置失败: {e}"),
+        };
     }
 
     fn refresh_preview(&mut self, ctx: &egui::Context) {
@@ -345,6 +357,27 @@ impl eframe::App for App {
                     }
                 }
             });
+
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new("候选窗口布局").strong());
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                let is_h = self.layout == config::LAYOUT_HORIZONTAL;
+                if ui.selectable_label(!is_h, "竖排（每行一个候选）").clicked() {
+                    self.set_layout(config::LAYOUT_VERTICAL);
+                }
+                if ui.selectable_label(is_h, "横排（候选在同一行）").clicked() {
+                    self.set_layout(config::LAYOUT_HORIZONTAL);
+                }
+            });
+            ui.add_space(2.0);
+            ui.label(
+                egui::RichText::new("皮肤自动匹配横/竖版：横排用 Scheme_H，竖排用 Scheme_V。")
+                    .size(11.0)
+                    .color(ui.visuals().weak_text_color()),
+            );
 
             ui.add_space(10.0);
             ui.separator();

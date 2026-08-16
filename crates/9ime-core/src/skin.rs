@@ -37,7 +37,10 @@ pub struct Skin {
     pub preedit_color: u32,
     pub candidate_color: u32,
     pub candidate_hl_color: u32,
+    /// Horizontal candidate window scheme (Scheme_H1/H2).
     pub scheme: Scheme,
+    /// Vertical candidate window scheme (Scheme_V1/V2).
+    pub scheme_vertical: Scheme,
 }
 
 fn decode_ini_text(raw: &[u8]) -> Option<String> {
@@ -113,6 +116,23 @@ fn parse_scheme(ini: &Ini, section: &str, files: &SkinFiles) -> Scheme {
     s
 }
 
+/// Pick the best scheme from a list of candidate sections: the first one
+/// with a background image wins; otherwise the first with any layout info;
+/// otherwise an empty scheme.
+fn pick_scheme(ini: &Ini, files: &SkinFiles, sections: &[&str]) -> Scheme {
+    let mut fallback: Option<Scheme> = None;
+    for sec in sections {
+        let s = parse_scheme(ini, sec, files);
+        if s.pic.is_some() {
+            return s;
+        }
+        if fallback.is_none() {
+            fallback = Some(s);
+        }
+    }
+    fallback.unwrap_or_default()
+}
+
 /// Parse a skin from extracted container files.
 pub fn parse(files: &SkinFiles) -> Option<Skin> {
     let ini_raw = file(files, "skin.ini")?;
@@ -130,26 +150,10 @@ pub fn parse(files: &SkinFiles) -> Option<Skin> {
     skin.candidate_color = ini::get_color(&ini, "Display", "zhongwen_color", 0x111111);
     skin.candidate_hl_color =
         ini::get_color(&ini, "Display", "zhongwen_first_color", 0x0044CC);
-    // Sogou skins define several schemes; the default candidate bar is
-    // horizontal, so Scheme_H1 (the main horizontal scheme) carries the
-    // background image. Prefer the first scheme that has a pic, in display
-    // priority order, and fall back to the first scheme with any layout
-    // info (so margins/highlights survive even without a background).
-    let mut fallback: Option<Scheme> = None;
-    for sec in ["Scheme_H1", "Scheme_H2", "Scheme_V1", "Scheme_V2", "Scheme"] {
-        let s = parse_scheme(&ini, sec, files);
-        if s.pic.is_some() {
-            skin.scheme = s;
-            break;
-        }
-        if fallback.is_none() {
-            fallback = Some(s);
-        }
-    }
-    if skin.scheme.pic.is_none() {
-        if let Some(fb) = fallback {
-            skin.scheme = fb;
-        }
-    }
+    // Sogou skins define two orientations: Scheme_H1/H2 (horizontal) and
+    // Scheme_V1/V2 (vertical). Keep both so the candidate window can match
+    // its layout to the skin's orientation.
+    skin.scheme = pick_scheme(&ini, files, &["Scheme_H1", "Scheme_H2", "Scheme"]);
+    skin.scheme_vertical = pick_scheme(&ini, files, &["Scheme_V1", "Scheme_V2", "Scheme"]);
     Some(skin)
 }
