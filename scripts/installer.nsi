@@ -1,4 +1,4 @@
-﻿; 9IME v2 installer
+; 9IME v2 installer
 Unicode true
 Name "9IME"
 !cd "..\target\release"
@@ -16,6 +16,17 @@ UninstPage instfiles
 !insertmacro MUI_LANGUAGE "SimpChinese"
 
 Section "9IME" SEC_MAIN
+  ; ---- upgrade-in-place: free the in-use DLL before overwriting ----
+  ; A TSF DLL that is registered gets loaded into ctfmon.exe and every app
+  ; with an input context, so "File" cannot overwrite it. Unregister it and
+  ; Delete it (a loaded DLL can be deleted/renamed thanks to
+  ; FILE_SHARE_DELETE, just not overwritten), then write the new one fresh.
+  ExecWait 'regsvr32 /u /s "$INSTDIR\nineime_tsf.dll"'
+  ; stop a running server so its exe can be replaced too
+  nsExec::ExecToLog 'taskkill /f /im nineime-server.exe'
+  Delete "$INSTDIR\nineime_tsf.dll"
+  Delete "$INSTDIR\nineime-server.exe"
+
   SetOutPath "$INSTDIR"
   File "/oname=nineime_tsf.dll" "nineime_tsf.dll"
   File "nineime-server.exe"
@@ -35,6 +46,8 @@ SectionEnd
 
 Section "Uninstall"
   ExecWait 'regsvr32 /u /s "$INSTDIR\nineime_tsf.dll"'
+  ; stop the input server so its files can be removed
+  nsExec::ExecToLog 'taskkill /f /im nineime-server.exe'
   Delete "$INSTDIR\nineime_tsf.dll"
   Delete "$INSTDIR\nineime-server.exe"
   Delete "$INSTDIR\nineime-deployer.exe"
