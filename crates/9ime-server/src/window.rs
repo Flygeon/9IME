@@ -151,10 +151,72 @@ fn to_img(w: i32, h: i32, rgba: &[u8]) -> Option<Img> {
     Some(Img { w, h, px })
 }
 
-fn load_img(png: &Option<Vec<u8>>) -> Option<Img> {
-    let bytes = png.as_ref()?;
-    let (w, h, rgba) = decode_png(bytes)?;
-    to_img(w, h, &rgba)
+fn load_img(bytes: &Option<Vec<u8>>) -> Option<Img> {
+    let bytes = bytes.as_ref()?;
+    if let Some((w, h, rgba)) = decode_png(bytes) {
+        return to_img(w, h, &rgba);
+    }
+    if let Some((w, h, rgba)) = decode_bmp(bytes) {
+        return to_img(w, h, &rgba);
+    }
+    None
+}
+
+/// Minimal decoder for uncompressed 24/32bpp Windows BMPs (BI_RGB), the
+/// format Sogou skins use for their highlight / status-bar images.
+fn decode_bmp(data: &[u8]) -> Option<(i32, i32, Vec<u8>)> {
+    if data.len() < 54 || &data[0..2] != b"BM" {
+        return None;
+    }
+    let pixel_offset = u32::from_le_bytes([data[10], data[11], data[12], data[13]]) as usize;
+    let dib_size = u32::from_le_bytes([data[14], data[15], data[16], data[17]]) as usize;
+    if dib_size < 40 {
+        return None;
+    }
+    let width = i32::from_le_bytes([data[18], data[19], data[20], data[21]]);
+    let height_raw = i32::from_le_bytes([data[22], data[23], data[24], data[25]]);
+    let bpp = u16::from_le_bytes([data[28], data[29]]) as usize;
+    let compression = u32::from_le_bytes([data[30], data[31], data[32], data[33]]);
+    if compression != 0 || width <= 0 || height_raw == 0 {
+        return None;
+    }
+    let bytes_per_px = bpp / 8;
+    if bytes_per_px != 3 && bytes_per_px != 4 {
+        return None;
+    }
+    let h = height_raw.abs();
+    let top_down = height_raw < 0;
+    let (w, hh) = (width as usize, h as usize);
+    let row_size = ((bpp as u32 * width as u32 + 31) / 32 * 4) as usize;
+    let mut rgba = vec![0u8; w * hh * 4];
+    for row in 0..hh {
+        let src_row = if top_down { row } else { hh - 1 - row };
+        let src_base = pixel_offset + src_row * row_size;
+        if src_base + row_size > data.len() {
+            return None;
+        }
+        for x in 0..w {
+            let si = src_base + x * bytes_per_px;
+            let (b, g, r) = (data[si], data[si + 1], data[si + 2]);
+            let a = if bytes_per_px == 4 { data[si + 3] } else { 255 };
+            let di = (row * w + x) * 4;
+            rgba[di] = r;
+            rgba[di + 1] = g;
+            rgba[di + 2] = b;
+            // 32bpp BMPs often leave the alpha byte zero (unused); treat an
+            // all-zero alpha image as fully opaque.
+            rgba[di + 3] = a;
+        }
+    }
+    if bytes_per_px == 4 {
+        let any_alpha = rgba.chunks_exact(4).any(|p| p[3] != 0);
+        if !any_alpha {
+            for p in rgba.chunks_exact_mut(4) {
+                p[3] = 255;
+            }
+        }
+    }
+    Some((width, h, rgba))
 }
 
 fn build_skin_gfx(sk: &nineime_core::skin::Skin) -> SkinGfx {
@@ -573,9 +635,9 @@ fn present(hwnd: HWND, visible: bool, ax: i32, ay: i32, frame: &Frame, gfx: Opti
                                     &mut buf, w, h, hl, mg, mg, mg, mg,
                                     ca_l / 2, y, win_w - ca_l / 2 - ca_r / 2, line_h,
                                 );
-                            } else {
-                                fill_rect(&mut buf, w, h, ca_l / 2, y, win_w - ca_l / 2 - ca_r / 2, line_h, FB_SEL_BG, 255);
                             }
+                            // no highlight image: leave the skin background as
+                            // is and only recolor the text below
                         } else {
                             fill_rect(&mut buf, w, h, 1, y, win_w - 2, line_h, FB_SEL_BG, 255);
                         }

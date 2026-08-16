@@ -39,20 +39,27 @@ pub fn get(ini: &Ini, section: &str, key: &str) -> Option<String> {
         .cloned()
 }
 
+/// Parse an integer, accepting 0x/0X hex and decimal forms.
+fn parse_int(s: &str) -> Option<i32> {
+    let t = s.trim();
+    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        i32::from_str_radix(hex, 16).ok()
+    } else {
+        t.parse::<i32>().ok()
+    }
+}
+
 pub fn get_int(ini: &Ini, section: &str, key: &str, def: i32) -> i32 {
     get(ini, section, key)
-        .and_then(|v| v.trim().parse::<i32>().ok())
+        .and_then(|v| parse_int(&v))
         .unwrap_or(def)
 }
 
-/// Parse a comma-separated integer list.
+/// Parse a comma-separated integer list (values may be hex, e.g. colors in
+/// the "separator" entry: 0xd8d8d8,66,196).
 pub fn get_int_list(ini: &Ini, section: &str, key: &str) -> Vec<i32> {
     get(ini, section, key)
-        .map(|v| {
-            v.split(",")
-                .map(|p| p.trim().parse::<i32>().unwrap_or(0))
-                .collect()
-        })
+        .map(|v| v.split(",").map(|p| parse_int(p).unwrap_or(0)).collect())
         .unwrap_or_default()
 }
 

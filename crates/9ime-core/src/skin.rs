@@ -130,17 +130,25 @@ pub fn parse(files: &SkinFiles) -> Option<Skin> {
     skin.candidate_color = ini::get_color(&ini, "Display", "zhongwen_color", 0x111111);
     skin.candidate_hl_color =
         ini::get_color(&ini, "Display", "zhongwen_first_color", 0x0044CC);
-    skin.scheme = parse_scheme(&ini, "Scheme_H2", files);
+    // Sogou skins define several schemes; the default candidate bar is
+    // horizontal, so Scheme_H1 (the main horizontal scheme) carries the
+    // background image. Prefer the first scheme that has a pic, in display
+    // priority order, and fall back to the first scheme with any layout
+    // info (so margins/highlights survive even without a background).
+    let mut fallback: Option<Scheme> = None;
+    for sec in ["Scheme_H1", "Scheme_H2", "Scheme_V1", "Scheme_V2", "Scheme"] {
+        let s = parse_scheme(&ini, sec, files);
+        if s.pic.is_some() {
+            skin.scheme = s;
+            break;
+        }
+        if fallback.is_none() {
+            fallback = Some(s);
+        }
+    }
     if skin.scheme.pic.is_none() {
-        // fall back to the vertical scheme, then to a bare scheme
-        let v = parse_scheme(&ini, "Scheme_V2", files);
-        if v.pic.is_some() {
-            skin.scheme = v;
-        } else {
-            let s = parse_scheme(&ini, "Scheme", files);
-            if s.pic.is_some() {
-                skin.scheme = s;
-            }
+        if let Some(fb) = fallback {
+            skin.scheme = fb;
         }
     }
     Some(skin)
