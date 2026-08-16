@@ -72,7 +72,7 @@ impl TextService {
         // 2. key event sink (foreground keys).
         let keysink: ITfKeyEventSink = KeyEventSink {
             shared: shared.clone(),
-            test_pending: Mutex::new(false),
+            test_pending: Mutex::new(TestState::Unknown),
         }.into();
         let km: ITfKeystrokeMgr = tm.cast()?;
         unsafe { km.AdviseKeyEventSink(tid, &keysink, true.into()) }?;
@@ -159,11 +159,24 @@ impl ITfThreadMgrEventSink_Impl for ThreadMgrEventSink_Impl {
     }
 }
 
+/// Result of the last OnTestKeyDown within one key cycle.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TestState {
+    /// No test seen this cycle (some apps skip the test call).
+    Unknown,
+    /// The test consumed the key; OnKeyDown must eat it without
+    /// re-processing (the engine already saw it once).
+    Eaten,
+    /// The test passed the key through; OnKeyDown must NOT re-send it to
+    /// the engine (a second send would double-commit / double-type).
+    Passed,
+}
+
 /// Receives key events from TSF and forwards them to the engine.
 #[implement(ITfKeyEventSink)]
 pub struct KeyEventSink {
     pub shared: Arc<Mutex<Shared>>,
-    pub test_pending: Mutex<bool>,
+    pub test_pending: Mutex<TestState>,
 }
 
 impl KeyEventSink {
@@ -210,13 +223,16 @@ impl ITfKeyEventSink_Impl for KeyEventSink_Impl {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> Result<BOOL> {
-        // Some apps send multiple OnTestKeyDown per key event.
         let mut p = self.test_pending.lock().unwrap();
-        if *p {
-            return Ok(true.into());
+        // Some apps send multiple OnTestKeyDown per key event: answer from
+        // the cached result instead of feeding the engine twice.
+        match *p {
+            TestState::Eaten => return Ok(true.into()),
+            TestState::Passed => return Ok(false.into()),
+            TestState::Unknown => {}
         }
         let eaten = self.process_key(pic, wparam, lparam)?;
-        *p = eaten;
+        *p = if eaten { TestState::Eaten } else { TestState::Passed };
         Ok(eaten.into())
     }
 
@@ -227,12 +243,23 @@ impl ITfKeyEventSink_Impl for KeyEventSink_Impl {
         lparam: LPARAM,
     ) -> Result<BOOL> {
         let mut p = self.test_pending.lock().unwrap();
-        if *p {
-            *p = false;
-            return Ok(true.into());
+        match *p {
+            // The engine already handled this key during the test call.
+            TestState::Eaten => {
+                *p = TestState::Unknown;
+                Ok(true.into())
+            }
+            // The engine saw it and passed; do not send it again.
+            TestState::Passed => {
+                *p = TestState::Unknown;
+                Ok(false.into())
+            }
+            // No test call preceded this down: process now.
+            TestState::Unknown => {
+                let eaten = self.process_key(pic, wparam, lparam)?;
+                Ok(eaten.into())
+            }
         }
-        let eaten = self.process_key(pic, wparam, lparam)?;
-        Ok(eaten.into())
     }
 
     fn OnTestKeyUp(
@@ -242,7 +269,7 @@ impl ITfKeyEventSink_Impl for KeyEventSink_Impl {
         _lparam: LPARAM,
     ) -> Result<BOOL> {
         // A key-up cancels any pending test-key-down state.
-        *self.test_pending.lock().unwrap() = false;
+        *self.test_pending.lock().unwrap() = TestState::Unknown;
         Ok(false.into())
     }
 
@@ -252,7 +279,7 @@ impl ITfKeyEventSink_Impl for KeyEventSink_Impl {
         _wparam: WPARAM,
         _lparam: LPARAM,
     ) -> Result<BOOL> {
-        *self.test_pending.lock().unwrap() = false;
+        *self.test_pending.lock().unwrap() = TestState::Unknown;
         Ok(false.into())
     }
 

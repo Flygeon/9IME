@@ -12,6 +12,7 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::LibraryLoader::{
     GetModuleFileNameW, GetModuleHandleExW, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
 };
+use windows::Win32::System::Pipes::WaitNamedPipeW;
 use windows::Win32::System::Threading::{
     CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW, CREATE_NO_WINDOW,
 };
@@ -59,6 +60,17 @@ fn read_exact(h: HANDLE, buf: &mut [u8]) -> bool {
 
 fn try_open() -> Option<HANDLE> {
     let name: Vec<u16> = PIPE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
+    // The server may be busy serving another app; wait briefly for a free
+    // pipe instance instead of failing right away.
+    let h = open_once(&name);
+    if h.is_some() {
+        return h;
+    }
+    let _ = unsafe { WaitNamedPipeW(PCWSTR(name.as_ptr()), 500) };
+    open_once(&name)
+}
+
+fn open_once(name: &[u16]) -> Option<HANDLE> {
     let h = unsafe {
         CreateFileW(
             PCWSTR(name.as_ptr()),

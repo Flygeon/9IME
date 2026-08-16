@@ -103,10 +103,27 @@ fn set_string(hkey: HKEY, name: &str, value: &str) -> windows::core::Result<()> 
 }
 
 fn dll_path() -> Vec<u16> {
-    let mut buf = vec![0u16; 2048];
-    let n = unsafe { GetModuleFileNameW(None, &mut buf) };
-    buf.truncate(n as usize);
-    buf
+    // GetModuleFileNameW(None) would return the HOST PROCESS path
+    // (e.g. C:\\Windows\\system32\\regsvr32.exe during registration),
+    // which breaks InprocServer32. Resolve our own module handle from a
+    // code address inside this DLL instead.
+    use windows::Win32::System::LibraryLoader::{
+        GetModuleHandleExW, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+        GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+    };
+    unsafe {
+        let mut hmod = windows::Win32::Foundation::HMODULE::default();
+        let addr = dll_path as *const () as *const u16;
+        let flags = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+            | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+        if GetModuleHandleExW(flags, PCWSTR(addr), &mut hmod).is_err() {
+            return Vec::new();
+        }
+        let mut buf = vec![0u16; 2048];
+        let n = GetModuleFileNameW(Some(hmod), &mut buf);
+        buf.truncate(n as usize);
+        buf
+    }
 }
 
 /// Write CLSID InprocServer32 + register TIP profile and categories.
@@ -118,6 +135,11 @@ pub unsafe fn register() -> windows::core::Result<()> {
     set_string(clsid_key, "", "9IME Text Service")?;
     let inproc = create_key(clsid_key, "InprocServer32")?;
     let path_w = dll_path();
+    if path_w.is_empty() {
+        return Err(windows::core::Error::from_hresult(
+            windows::core::HRESULT::from_win32(0x80070002),
+        ));
+    }
     set_value(inproc, "", &u16_bytes(&path_w), REG_SZ)?;
     set_string(inproc, "ThreadingModel", "Apartment")?;
     let _ = unsafe { RegCloseKey(inproc) };

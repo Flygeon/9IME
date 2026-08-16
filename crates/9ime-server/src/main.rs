@@ -198,6 +198,10 @@ fn main() {
     slog::log(&format!("librime {version} loaded"));
 
     // traits must outlive initialize.
+    let log_dir = user.join("log");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_c = cstr(&log_dir.to_string_lossy());
+    let dist_c = cstr("9IME");
     let shared_c = cstr(&shared.to_string_lossy());
     let user_c = cstr(&user.to_string_lossy());
     let app_c = cstr("rime.9ime");
@@ -205,7 +209,10 @@ fn main() {
     traits.shared_data_dir = shared_c.as_ptr();
     traits.user_data_dir = user_c.as_ptr();
     traits.app_name = app_c.as_ptr();
+    traits.distribution_name = dist_c.as_ptr();
+    traits.distribution_code_name = dist_c.as_ptr();
     traits.min_log_level = 1;
+    traits.log_dir = log_c.as_ptr();
 
     if let Err(e) = rime.initialize(&traits) {
         slog::log(&format!("FATAL initialize failed: {e}"));
@@ -213,9 +220,9 @@ fn main() {
         std::process::exit(1);
     }
 
-    // deploy in a background thread so the pipe can answer immediately;
-    // the pipe thread waits for deploy_done before processing keys.
-    let build_dir = user.join("build");
+    // Deploy in a background thread so the pipe can answer immediately.
+    // The rime thread creates the session lazily once deploy_done is set,
+    // so librime is never asked for a session while in maintenance mode.
     let deploy_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let deploy_done2 = deploy_done.clone();
     let deploy_rime = Rime::load(&dll);
@@ -223,6 +230,7 @@ fn main() {
     std::thread::spawn(move || {
         let Ok(dr) = deploy_rime else {
             slog::log("deploy thread: cannot load librime");
+            deploy_done2.store(true, std::sync::atomic::Ordering::SeqCst);
             return;
         };
         let full = !deploy_user.join("build").join("default.yaml").exists();
@@ -232,26 +240,15 @@ fn main() {
         deploy_done2.store(true, std::sync::atomic::Ordering::SeqCst);
     });
 
-    // one session, used only on this thread (after deploy finishes)
-    let mut sess = match rime.create_session() {
-        Ok(s) => s,
-        Err(e) => {
-            slog::log(&format!("FATAL create_session failed: {e}"));
-            eprintln!("server: create_session failed: {e}");
-            std::process::exit(1);
-        }
-    };
-    let schema = sess.current_schema().unwrap_or_default();
-    slog::log(&format!("session {}, schema {}", sess.id, schema));
-
     let ui = Arc::new(Mutex::new(UiState::new()));
     let changed = Arc::new(AtomicBool::new(false));
     let win = window::CandidateWindow::spawn(ui.clone(), changed.clone());
     slog::log("candidate window thread started");
 
-    pipe::serve(&rime, &mut sess, ui.clone(), changed.clone(), deploy_done);
+    // Pipe listener in the background; this thread is the rime thread.
+    let rx = pipe::start_listener();
+    pipe::run(&rime, ui.clone(), changed.clone(), deploy_done, rx);
 
-    let _ = sess.destroy();
     let _ = rime.finalize();
     let _ = win.join();
     slog::log("server exit");

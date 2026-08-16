@@ -1,16 +1,28 @@
-//! Named-pipe server loop: one client at a time, JSON messages.
+//! Named-pipe server: accepts many concurrent clients (one per app
+//! process) and funnels every request to the single rime thread through a
+//! channel — librime sessions must be driven from one thread only.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use windows::Win32::Foundation::{CloseHandle, ERROR_PIPE_CONNECTED, GetLastError, HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile, PIPE_ACCESS_DUPLEX};
-use windows::Win32::System::Pipes::{ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT};
+use windows::Win32::System::Pipes::{
+    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe,
+    PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
+};
 
 use nineime_ipc::{self, Request, Response};
 use nineime_librime::{Rime, RimeSession};
 
-use crate::{UiState, context_msg, status_msg};
+use crate::{context_msg, status_msg, UiState};
+
+/// One unit of work for the rime thread.
+pub struct Work {
+    req: Request,
+    reply: Sender<Response>,
+}
 
 fn write_all(h: HANDLE, mut data: &[u8]) -> bool {
     while !data.is_empty() {
@@ -41,16 +53,6 @@ fn read_exact(h: HANDLE, buf: &mut [u8]) -> bool {
     true
 }
 
-/// Block until the startup deploy finished (bounded).
-fn wait_for_deploy(done: &Arc<AtomicBool>) {
-    for _ in 0..1800 {
-        if done.load(Ordering::SeqCst) {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-}
-
 fn read_msg(h: HANDLE) -> Option<Request> {
     let mut len_buf = [0u8; 4];
     if !read_exact(h, &mut len_buf) {
@@ -67,23 +69,26 @@ fn read_msg(h: HANDLE) -> Option<Request> {
     nineime_ipc::decode::<Request>(&body).ok()
 }
 
-pub fn serve(
-    rime: &Rime,
-    sess: &mut RimeSession,
-    ui: Arc<Mutex<UiState>>,
-    changed: Arc<AtomicBool>,
-    deploy_done: Arc<AtomicBool>,
-) {
-    let pipe_name: Vec<u16> = nineime_ipc::PIPE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
-    let mut shutdown = false;
+/// Start the pipe listener on a background thread; the returned receiver is
+/// drained by the rime thread via [run].
+pub fn start_listener() -> Receiver<Work> {
+    let (tx, rx) = channel::<Work>();
+    std::thread::spawn(move || listener_loop(tx));
+    rx
+}
 
-    while !shutdown {
+fn listener_loop(tx: Sender<Work>) {
+    let pipe_name: Vec<u16> = nineime_ipc::PIPE_NAME
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    loop {
         let h = unsafe {
             CreateNamedPipeW(
                 windows::core::PCWSTR(pipe_name.as_ptr()),
                 PIPE_ACCESS_DUPLEX,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                1,
+                16,
                 65536,
                 65536,
                 0,
@@ -91,7 +96,10 @@ pub fn serve(
             )
         };
         if h == INVALID_HANDLE_VALUE {
-            eprintln!("9IME server: CreateNamedPipeW failed: {}", unsafe { GetLastError() }.0);
+            crate::slog::log(&format!(
+                "CreateNamedPipeW failed: {}",
+                unsafe { GetLastError() }.0
+            ));
             std::thread::sleep(std::time::Duration::from_secs(1));
             continue;
         }
@@ -102,30 +110,90 @@ pub fn serve(
             continue;
         }
         crate::slog::log("client connected");
+        let txx = tx.clone();
+        let sh = SendHandle(h); // wrap before the spawn so only Send types are captured
+        std::thread::spawn(move || client_loop(sh, txx));
+    }
+}
 
-        loop {
-            let Some(req) = read_msg(h) else { break };
-            let is_shutdown = matches!(&req, Request::Shutdown);
-            let resp = handle(rime, sess, req, &ui, &changed, &deploy_done);
-            let bytes = nineime_ipc::encode(&resp);
-            if !write_all(h, &bytes) {
-                break;
-            }
-            // Shutdown is answered as Ok; detect via the request itself.
-            if is_shutdown {
-                shutdown = true;
-                ui.lock().unwrap().quit = true;
-                break;
-            }
+// The raw pipe handle carries no thread affinity by itself; only its value
+// crosses into the spawned reader thread (never dereferenced there).
+struct SendHandle(HANDLE);
+unsafe impl Send for SendHandle {}
+
+fn client_loop(h: SendHandle, tx: Sender<Work>) {
+    let h = h.0;
+    loop {
+        let Some(req) = read_msg(h) else { break };
+        let (rtx, rrx) = channel::<Response>();
+        if tx.send(Work { req, reply: rtx }).is_err() {
+            break;
         }
-        let _ = unsafe { CloseHandle(h) };
-        crate::slog::log("client disconnected");
+        let Ok(resp) = rrx.recv() else { break };
+        let bytes = nineime_ipc::encode(&resp);
+        if !write_all(h, &bytes) {
+            break;
+        }
+    }
+    let _ = unsafe { DisconnectNamedPipe(h) };
+    let _ = unsafe { CloseHandle(h) };
+    crate::slog::log("client disconnected");
+}
+
+/// Rime-thread work loop: owns the session and applies every request.
+pub fn run(
+    rime: &Rime,
+    ui: Arc<Mutex<UiState>>,
+    changed: Arc<AtomicBool>,
+    deploy_done: Arc<AtomicBool>,
+    rx: Receiver<Work>,
+) {
+    let mut sess: Option<RimeSession> = None;
+    for work in rx {
+        let is_shutdown = matches!(work.req, Request::Shutdown);
+        let resp = handle(rime, &mut sess, work.req, &ui, &changed, &deploy_done);
+        let _ = work.reply.send(resp);
+        if is_shutdown {
+            ui.lock().unwrap().quit = true;
+            changed.store(true, Ordering::Relaxed);
+            break;
+        }
+    }
+    if let Some(mut s) = sess.take() {
+        let _ = s.destroy();
+    }
+}
+
+/// Create the session lazily — only after the startup deploy finished, so
+/// librime is never asked for a session while in maintenance mode.
+fn ensure_session(
+    rime: &Rime,
+    sess: &mut Option<RimeSession>,
+    deploy_done: &Arc<AtomicBool>,
+) -> bool {
+    if sess.is_some() {
+        return true;
+    }
+    if !deploy_done.load(Ordering::SeqCst) {
+        return false;
+    }
+    match rime.create_session() {
+        Ok(s) => {
+            let schema = s.current_schema().unwrap_or_default();
+            crate::slog::log(&format!("session {} created, schema {}", s.id, schema));
+            *sess = Some(s);
+            true
+        }
+        Err(e) => {
+            crate::slog::log(&format!("create_session failed (will retry): {e}"));
+            false
+        }
     }
 }
 
 fn handle(
     rime: &Rime,
-    sess: &mut RimeSession,
+    sess: &mut Option<RimeSession>,
     req: Request,
     ui: &Arc<Mutex<UiState>>,
     changed: &Arc<AtomicBool>,
@@ -133,7 +201,7 @@ fn handle(
 ) -> Response {
     match req {
         Request::Hello { pid } => {
-            println!("9IME server: hello from pid {pid}");
+            crate::slog::log(&format!("hello from pid {pid}"));
             Response::Hello {
                 ok: true,
                 version: rime.version().unwrap_or_default(),
@@ -153,8 +221,18 @@ fn handle(
             anchor_x,
             anchor_y,
         } => {
-            // first-run deploy may still be running; wait (up to 3 min)
-            wait_for_deploy(deploy_done);
+            // While the first-run deploy is still building dictionaries we
+            // must not touch librime; pass keys through instead of blocking
+            // the caller's UI thread.
+            if !ensure_session(rime, sess, deploy_done) {
+                return Response::KeyResult {
+                    handled: false,
+                    commit: None,
+                    context: Default::default(),
+                    status: Default::default(),
+                };
+            }
+            let sess = sess.as_ref().unwrap();
             let handled = sess.process_key(keycode, mask);
             let commit = sess.get_commit();
             let context = sess.get_context().map(|c| context_msg(&c)).unwrap_or_default();
@@ -180,35 +258,41 @@ fn handle(
             }
         }
         Request::SelectCandidate { index } => {
-            let ok = sess.select_candidate(index);
-            let context = sess.get_context().map(|c| context_msg(&c)).unwrap_or_default();
-            let mut st = ui.lock().unwrap();
-            st.context = context.clone();
-            st.visible = context.composing;
-            changed.store(true, Ordering::Relaxed);
-            let _ = ok;
+            if let Some(sess) = sess.as_ref() {
+                let ok = sess.select_candidate(index);
+                let context = sess.get_context().map(|c| context_msg(&c)).unwrap_or_default();
+                let mut st = ui.lock().unwrap();
+                st.context = context.clone();
+                st.visible = context.composing;
+                changed.store(true, Ordering::Relaxed);
+                let _ = ok;
+            }
             Response::Ok { ok: true }
         }
         Request::SelectCandidateOnCurrentPage { index } => {
-            let ok = sess.select_candidate_on_current_page(index);
-            let _ = ok;
+            if let Some(sess) = sess.as_ref() {
+                let ok = sess.select_candidate_on_current_page(index);
+                let _ = ok;
+            }
             Response::Ok { ok: true }
         }
         Request::ChangePage { backward } => {
-            let ok = sess.change_page(backward);
-            let context = sess.get_context().map(|c| context_msg(&c)).unwrap_or_default();
-            let mut st = ui.lock().unwrap();
-            st.context = context.clone();
-            changed.store(true, Ordering::Relaxed);
-            let _ = ok;
+            if let Some(sess) = sess.as_ref() {
+                let ok = sess.change_page(backward);
+                let context = sess.get_context().map(|c| context_msg(&c)).unwrap_or_default();
+                let mut st = ui.lock().unwrap();
+                st.context = context.clone();
+                changed.store(true, Ordering::Relaxed);
+                let _ = ok;
+            }
             Response::Ok { ok: true }
         }
         Request::SetOption { name, value } => {
-            let ok = sess.set_option(&name, value);
+            let ok = sess.as_ref().map(|s| s.set_option(&name, value)).unwrap_or(false);
             Response::Ok { ok }
         }
         Request::SelectSchema { id } => {
-            let ok = sess.select_schema(&id);
+            let ok = sess.as_ref().map(|s| s.select_schema(&id)).unwrap_or(false);
             Response::Ok { ok }
         }
         Request::Deploy => {

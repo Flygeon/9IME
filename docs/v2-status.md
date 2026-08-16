@@ -46,3 +46,29 @@ Local validation: `cargo +stable-x86_64-pc-windows-gnu check --workspace`
 
 ## M5 (next): installer (NSIS) + packaging; CI artifacts.
 ## M6: CI workflow + squash-rewrite of the Flygeon/9IME repository.
+
+## Post-M4 fix round (input actually works now)
+- register: InprocServer32/icon path came from GetModuleFileNameW(NULL) =
+  the host exe (regsvr32.exe) -> TSF could never load the service and all
+  keys passed through as plain English. Now resolved from the DLL's own
+  module handle (GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS).
+- tsf: modifier mask now follows the X11 layout librime expects
+  (Shift=1/Lock=2/Ctrl=4/Alt=8); full VK->X11 keysym map (BackSpace/Return/
+  Escape/Delete/Home/End/F-keys/numpad/OEM punctuation); bare modifier and
+  Alt+key presses pass through untouched.
+- tsf: OnTestKeyDown/OnKeyDown tri-state - a key the engine saw during the
+  test call is never fed twice (double letters / double commits).
+- tsf client: WaitNamedPipe on busy pipe instead of killing the server.
+- server: session is created lazily after the startup deploy (no more
+  create_session during maintenance mode); multi-client named pipe
+  (one rime thread fed via channel) so several apps can type at once;
+  keys pass through while the first-run deploy is still building.
+- window: layered per-pixel-alpha rendering, own 9-slice compositor for
+  skin background/highlight (rounded corners/shadows render correctly),
+  skin insets + separator + page indicator, work-area clamping,
+  click-through, DPI aware.
+- config: skin name resolves against the skins dir (case-insensitive,
+  single-skin fallback) - survives stale/mojibake'd config values.
+- deployer: redesigned UI (header/status bar/columns), skin preview with
+  background image + colors + font info, import/delete with confirmation,
+  open skins/log folders, restart server, deploy with elapsed time.
