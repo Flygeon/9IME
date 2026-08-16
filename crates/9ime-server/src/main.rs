@@ -44,7 +44,7 @@ impl UiState {
             skin: None,
             loaded_skin: String::new(),
             layout: String::new(),
-            ui_scale: 0.9,
+            ui_scale: 0.85,
             quit: false,
         }
     }

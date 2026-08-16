@@ -371,7 +371,6 @@ fn blit_nine(
 
 struct Measure {
     line_h: i32,
-    text_y_off: i32,
     widths: Vec<i32>,
 }
 
@@ -409,7 +408,6 @@ fn measure(hdc: HDC, frame: &Frame, scale: f32) -> Measure {
         let _ = GetTextMetricsW(hdc, &mut tm);
         let leading = tm.tmExternalLeading.max(1);
         let line_h = (tm.tmHeight + leading + 4).max((18.0 * scale) as i32);
-        let text_y_off = ((line_h - tm.tmHeight) / 2).max(0);
         let mut widths = Vec::with_capacity(frame.lines.len());
         for line in &frame.lines {
             let wide: Vec<u16> = line.text.encode_utf16().collect();
@@ -417,11 +415,7 @@ fn measure(hdc: HDC, frame: &Frame, scale: f32) -> Measure {
             let _ = GetTextExtentPoint32W(hdc, &wide, &mut sz);
             widths.push(sz.cx);
         }
-        Measure {
-            line_h,
-            text_y_off,
-            widths,
-        }
+        Measure { line_h, widths }
     }
 }
 
@@ -494,7 +488,7 @@ fn ui_thread(ui: Arc<Mutex<UiState>>, changed: Arc<AtomicBool>) {
                         s.loaded_skin.clone(),
                         s.skin.clone(),
                         s.layout.clone(),
-                        s.ui_scale.clamp(0.5, 2.0),
+                        s.ui_scale,
                     )
                 };
                 let horizontal = layout == nineime_core::config::LAYOUT_HORIZONTAL;
@@ -567,7 +561,11 @@ fn present(
         }
 
         let dpi = GetDpiForWindow(hwnd);
-        let scale = (dpi as f32 / 96.0) * ui_scale;
+        // Uniform scale = DPI factor * user ui_scale. Scaling the whole
+        // pipeline (insets, font, content AND the proportion floor below)
+        // keeps the skin's aspect ratio intact, so the window shrinks
+        // without distortion or text clipping.
+        let scale = (dpi as f32 / 96.0) * ui_scale.max(0.3);
         let sc = |v: i32| ((v as f32) * scale) as i32;
 
         // insets (skin or fallback)
@@ -623,11 +621,16 @@ fn present(
             (cw.max(sc(60)), ch)
         };
 
-        // Do not force the window to the skin's natural image size; that
-        // makes the candidate window disproportionately large. The 9-slice
-        // background will stretch to fit the content.
-        let win_w = content_w;
-        let win_h = content_h;
+        // proportion fix: never smaller than the skin's natural (DPI-scaled)
+        // size, so the skin image is not squished into a distorted window.
+        let mut win_w = content_w;
+        let mut win_h = content_h;
+        if let Some(g) = gfx {
+            if let Some(bg) = &g.bg {
+                win_w = win_w.max((bg.w as f32 * scale) as i32);
+                win_h = win_h.max((bg.h as f32 * scale) as i32);
+            }
+        }
         let (w, h) = (win_w as usize, win_h as usize);
 
         // ---- build text jobs, highlight rects, separator ----
@@ -660,7 +663,7 @@ fn present(
             }
         } else {
             let mut y = if has_preedit { pe_t } else { sc(3) };
-            for line in frame.lines.iter() {
+            for (i, line) in frame.lines.iter().enumerate() {
                 match line.kind {
                     LineKind::Preedit => {
                         text_jobs.push((pe_l, y, line.text.clone(), preedit_color));
@@ -760,7 +763,7 @@ fn present(
         for (x, ty, text, color) in text_jobs.iter() {
             let _ = SetTextColor(hdc_mem, cref(*color));
             let wide: Vec<u16> = text.encode_utf16().collect();
-            let _ = TextOutW(hdc_mem, *x, *ty + m.text_y_off, &wide);
+            let _ = TextOutW(hdc_mem, *x, *ty + 2, &wide);
             let mut sz = SIZE::default();
             let _ = GetTextExtentPoint32W(hdc_screen, &wide, &mut sz);
             text_rects.push((*x - 2, *ty, *x + sz.cx + 4, *ty + line_h));

@@ -33,7 +33,7 @@ impl Default for Config {
         Config {
             skin: String::new(),
             layout: LAYOUT_VERTICAL.to_string(),
-            ui_scale: 0.9,
+            ui_scale: 0.85,
         }
     }
 }
