@@ -3,8 +3,9 @@
 use std::path::{Path, PathBuf};
 
 use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, RECT};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, POINT, RECT};
 use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
+use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, ReadFile, WriteFile, FILE_SHARE_READ, FILE_SHARE_WRITE,
     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
@@ -17,7 +18,7 @@ use windows::Win32::System::Threading::{
     CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW, CREATE_NO_WINDOW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    ClientToScreen, GetForegroundWindow, GetGUIThreadInfo, GetWindowRect, GUITHREADINFO, POINT,
+    GetForegroundWindow, GetGUIThreadInfo, GetWindowRect, GUITHREADINFO,
 };
 
 use nineime_ipc::{PIPE_NAME, Request, Response};

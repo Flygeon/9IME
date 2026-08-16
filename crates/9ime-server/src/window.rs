@@ -660,7 +660,7 @@ fn present(
             }
         } else {
             let mut y = if has_preedit { pe_t } else { sc(3) };
-            for (i, line) in frame.lines.iter().enumerate() {
+            for line in frame.lines.iter() {
                 match line.kind {
                     LineKind::Preedit => {
                         text_jobs.push((pe_l, y, line.text.clone(), preedit_color));
