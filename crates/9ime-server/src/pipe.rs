@@ -245,6 +245,7 @@ fn handle(
                 st.skin = crate::skin::load_skin(&cfg.skin);
             }
             st.layout = cfg.layout;
+            st.ui_scale = cfg.ui_scale.clamp(0.5, 2.0);
             st.context = context.clone();
             st.status = status.clone();
             st.anchor_x = anchor_x;
@@ -291,6 +292,23 @@ fn handle(
         Request::SetOption { name, value } => {
             let ok = sess.as_ref().map(|s| s.set_option(&name, value)).unwrap_or(false);
             Response::Ok { ok }
+        }
+        Request::ToggleSimpTrad => {
+            if let Some(sess) = sess.as_ref() {
+                let current = sess
+                    .get_status()
+                    .map(|s| s.is_simplified)
+                    .unwrap_or(false);
+                let _ = sess.set_option("zh_hans", !current);
+                let context = sess.get_context().map(|c| context_msg(&c)).unwrap_or_default();
+                let status = sess.get_status().map(|s| status_msg(&s)).unwrap_or_default();
+                let mut st = ui.lock().unwrap();
+                st.context = context.clone();
+                st.status = status.clone();
+                st.visible = context.composing || !context.menu.candidates.is_empty();
+                changed.store(true, Ordering::Relaxed);
+            }
+            Response::Ok { ok: true }
         }
         Request::SelectSchema { id } => {
             let ok = sess.as_ref().map(|s| s.select_schema(&id)).unwrap_or(false);

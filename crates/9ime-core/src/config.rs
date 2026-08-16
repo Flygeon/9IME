@@ -19,11 +19,23 @@ pub fn skins_dir() -> PathBuf {
 pub const LAYOUT_VERTICAL: &str = "vertical";
 pub const LAYOUT_HORIZONTAL: &str = "horizontal";
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Config {
     pub skin: String,
     /// Candidate window layout: "vertical" (default) or "horizontal".
     pub layout: String,
+    /// Overall UI scale multiplier applied on top of DPI scaling.
+    pub ui_scale: f32,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            skin: String::new(),
+            layout: LAYOUT_VERTICAL.to_string(),
+            ui_scale: 0.9,
+        }
+    }
 }
 
 impl Config {
@@ -51,6 +63,11 @@ pub fn load() -> Config {
                     match key {
                         "skin" => cfg.skin = value.to_string(),
                         "layout" => cfg.layout = value.to_string(),
+                        "ui_scale" => {
+                            if let Ok(v) = value.parse::<f32>() {
+                                cfg.ui_scale = v.clamp(0.5, 2.0);
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -67,6 +84,10 @@ pub fn load() -> Config {
 pub fn save(cfg: &Config) -> std::io::Result<()> {
     let _ = std::fs::create_dir_all(&appdata_dir());
     let layout = if cfg.layout.is_empty() { LAYOUT_VERTICAL } else { &cfg.layout };
-    let text = format!("{{\"skin\": \"{}\", \"layout\": \"{}\"}}\n", cfg.skin, layout);
+    let scale = cfg.ui_scale.clamp(0.5, 2.0);
+    let text = format!(
+        "{{\"skin\": \"{}\", \"layout\": \"{}\", \"ui_scale\": {:.2}}}\n",
+        cfg.skin, layout, scale
+    );
     std::fs::write(config_path(), text)
 }

@@ -103,25 +103,9 @@ fn vk_to_rime(vk: u32, shift: bool) -> u32 {
         0x28 => 0xFF54, // Down
         0x2D => 0xFF63, // Insert
         0x2E => 0xFFFF, // Delete
-        0x30..=0x39 => {
-            if shift {
-                match vk {
-                    0x30 => b')' as u32,
-                    0x31 => b'!' as u32,
-                    0x32 => b'@' as u32,
-                    0x33 => b'#' as u32,
-                    0x34 => b'$' as u32,
-                    0x35 => b'%' as u32,
-                    0x36 => b'^' as u32,
-                    0x37 => b'&' as u32,
-                    0x38 => b'*' as u32,
-                    0x39 => b'(' as u32,
-                    _ => vk,
-                }
-            } else {
-                vk
-            }
-        }
+        // Digits: keep the keysym and let the shift mask carry the shifted
+        // state. This is required for Rime key bindings like Control+Shift+4.
+        0x30..=0x39 => vk,
         0x41..=0x5A => {
             if shift { vk } else { vk + 0x20 }
         }
@@ -155,13 +139,52 @@ fn should_skip(ke: &KeyEvent) -> bool {
         || ke.mask & MASK_ALT != 0
 }
 
+fn is_letter_or_digit(keycode: u32) -> bool {
+    (0x30..=0x39).contains(&keycode) || (0x41..=0x5A).contains(&keycode)
+}
+
+/// Explicit simplified/traditional toggle (Ctrl+Shift+F).
+pub fn toggle_simp_trad() -> EngineOutput {
+    with_client(|c| {
+        if c.is_none() {
+            *c = Client::connect();
+        }
+        match c.as_ref().and_then(|cl| cl.request(&Request::ToggleSimpTrad)) {
+            Some(Response::Ok { ok: true }) => EngineOutput::Handled { commit: None },
+            _ => {
+                log_line("toggle simp/trad request failed");
+                EngineOutput::Passthrough
+            }
+        }
+    })
+}
+
 pub fn process_key(ke: &KeyEvent) -> EngineOutput {
     if should_skip(ke) {
         return EngineOutput::Passthrough;
     }
+
+    // Explicit Ctrl+Shift+F toggle.
+    if ke.keycode == 0x46
+        && ke.mask & MASK_CTRL != 0
+        && ke.mask & MASK_SHIFT != 0
+    {
+        return toggle_simp_trad();
+    }
+
     let (ax, ay) = crate::ipc::current_anchor();
     let shifted = ke.mask & MASK_SHIFT != 0;
     let keycode = vk_to_rime(ke.keycode, shifted);
+
+    // Pass common Ctrl shortcuts (Ctrl+A/C/V/X/Z/Y...) to the application.
+    // Keep Control+Shift+4 so Rime's default zh_hans toggle still works.
+    if ke.mask & MASK_CTRL != 0 {
+        let is_rime_default_toggle = ke.keycode == 0x34 && ke.mask & MASK_SHIFT != 0;
+        if is_letter_or_digit(ke.keycode) && !is_rime_default_toggle {
+            return EngineOutput::Passthrough;
+        }
+    }
+
     let req = Request::ProcessKey {
         keycode,
         mask: ke.mask,

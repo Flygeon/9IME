@@ -55,6 +55,7 @@ pub enum Request {
     SelectCandidateOnCurrentPage { index: usize },
     ChangePage { backward: bool },
     SetOption { name: String, value: bool },
+    ToggleSimpTrad,
     SelectSchema { id: String },
     Deploy,
     Shutdown,

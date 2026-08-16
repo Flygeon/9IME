@@ -5,6 +5,9 @@ use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
+use windows::Win32::UI::HiDpi::{
+    SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+};
 
 use nineime_ipc::{ContextMsg, MenuMsg, StatusMsg};
 use nineime_librime::{ffi::RimeTraits, Rime};
@@ -25,6 +28,8 @@ pub struct UiState {
     pub loaded_skin: String,
     /// Candidate window orientation: "vertical" | "horizontal".
     pub layout: String,
+    /// Overall UI scale multiplier applied on top of DPI scaling.
+    pub ui_scale: f32,
     pub quit: bool,
 }
 
@@ -39,6 +44,7 @@ impl UiState {
             skin: None,
             loaded_skin: String::new(),
             layout: String::new(),
+            ui_scale: 0.9,
             quit: false,
         }
     }
@@ -176,6 +182,11 @@ fn main() {
     if args.iter().any(|a| a == "--deploy") {
         deploy_only();
         return;
+    }
+    // Make layered-window coordinates match the foreground app's screen pixels
+    // instead of being virtualized by the OS.
+    unsafe {
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
     let base = exe_dir();
     let dll = base.join("rime.dll");

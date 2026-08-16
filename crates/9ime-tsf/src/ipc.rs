@@ -16,7 +16,9 @@ use windows::Win32::System::Pipes::WaitNamedPipeW;
 use windows::Win32::System::Threading::{
     CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW, CREATE_NO_WINDOW,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetGUIThreadInfo, GUITHREADINFO, GetWindowRect};
+use windows::Win32::UI::WindowsAndMessaging::{
+    ClientToScreen, GetForegroundWindow, GetGUIThreadInfo, GetWindowRect, GUITHREADINFO, POINT,
+};
 
 use nineime_ipc::{PIPE_NAME, Request, Response};
 
@@ -214,17 +216,32 @@ pub fn current_anchor() -> (i32, i32) {
             ..Default::default()
         };
         if GetGUIThreadInfo(0, &mut gti).is_ok() {
+            // rcCaret is in client coordinates of hwndCaret; convert to screen.
             if !gti.hwndCaret.0.is_null()
                 && (gti.rcCaret.right - gti.rcCaret.left > 0
                     || gti.rcCaret.bottom - gti.rcCaret.top > 0)
             {
-                return (gti.rcCaret.left, gti.rcCaret.bottom);
+                let mut pt = POINT {
+                    x: gti.rcCaret.left,
+                    y: gti.rcCaret.bottom,
+                };
+                let _ = ClientToScreen(gti.hwndCaret, &mut pt);
+                return (pt.x, pt.y);
             }
             if !gti.hwndFocus.0.is_null() {
                 let mut r = RECT::default();
                 if GetWindowRect(gti.hwndFocus, &mut r).is_ok() {
                     return ((r.left + r.right) / 2, r.bottom);
                 }
+            }
+        }
+        // Fallback to the foreground window so the candidate window still
+        // shows up in applications that don't expose a TSF caret.
+        let hwnd = GetForegroundWindow();
+        if !hwnd.0.is_null() {
+            let mut r = RECT::default();
+            if GetWindowRect(hwnd, &mut r).is_ok() {
+                return ((r.left + r.right) / 2, r.bottom);
             }
         }
     }
