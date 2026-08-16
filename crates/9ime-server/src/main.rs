@@ -213,20 +213,26 @@ fn main() {
         std::process::exit(1);
     }
 
-    // deploy on first run (build dir missing)
+    // deploy in a background thread so the pipe can answer immediately;
+    // the pipe thread waits for deploy_done before processing keys.
     let build_dir = user.join("build");
-    if !build_dir.join("default.yaml").exists() {
-        slog::log("first run, deploying (this can take a minute)...");
-        match rime.deploy(true) {
-            Ok(ok) => slog::log(&format!("deploy ok={ok}")),
-            Err(e) => slog::log(&format!("deploy failed: {e}")),
-        }
-    } else {
-        // lightweight maintenance check (merges user config changes)
-        let _ = rime.deploy(false);
-    }
+    let deploy_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let deploy_done2 = deploy_done.clone();
+    let deploy_rime = Rime::load(&dll);
+    let deploy_user = user.clone();
+    std::thread::spawn(move || {
+        let Ok(dr) = deploy_rime else {
+            slog::log("deploy thread: cannot load librime");
+            return;
+        };
+        let full = !deploy_user.join("build").join("default.yaml").exists();
+        slog::log(if full { "first run, deploying..." } else { "maintenance deploy..." });
+        let r = dr.deploy(full);
+        slog::log(&format!("deploy result: {r:?}"));
+        deploy_done2.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
 
-    // one session, used only on this thread
+    // one session, used only on this thread (after deploy finishes)
     let mut sess = match rime.create_session() {
         Ok(s) => s,
         Err(e) => {
@@ -236,17 +242,17 @@ fn main() {
         }
     };
     let schema = sess.current_schema().unwrap_or_default();
-    println!("server: session {}, schema {}", sess.id, schema);
+    slog::log(&format!("session {}, schema {}", sess.id, schema));
 
     let ui = Arc::new(Mutex::new(UiState::new()));
     let changed = Arc::new(AtomicBool::new(false));
     let win = window::CandidateWindow::spawn(ui.clone(), changed.clone());
     slog::log("candidate window thread started");
 
-    pipe::serve(&rime, &mut sess, ui.clone(), changed.clone());
+    pipe::serve(&rime, &mut sess, ui.clone(), changed.clone(), deploy_done);
 
     let _ = sess.destroy();
     let _ = rime.finalize();
     let _ = win.join();
-    println!("server: exit");
+    slog::log("server exit");
 }

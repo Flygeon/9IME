@@ -41,6 +41,16 @@ fn read_exact(h: HANDLE, buf: &mut [u8]) -> bool {
     true
 }
 
+/// Block until the startup deploy finished (bounded).
+fn wait_for_deploy(done: &Arc<AtomicBool>) {
+    for _ in 0..1800 {
+        if done.load(Ordering::SeqCst) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 fn read_msg(h: HANDLE) -> Option<Request> {
     let mut len_buf = [0u8; 4];
     if !read_exact(h, &mut len_buf) {
@@ -62,6 +72,7 @@ pub fn serve(
     sess: &mut RimeSession,
     ui: Arc<Mutex<UiState>>,
     changed: Arc<AtomicBool>,
+    deploy_done: Arc<AtomicBool>,
 ) {
     let pipe_name: Vec<u16> = nineime_ipc::PIPE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
     let mut shutdown = false;
@@ -95,7 +106,7 @@ pub fn serve(
         loop {
             let Some(req) = read_msg(h) else { break };
             let is_shutdown = matches!(&req, Request::Shutdown);
-            let resp = handle(rime, sess, req, &ui, &changed);
+            let resp = handle(rime, sess, req, &ui, &changed, &deploy_done);
             let bytes = nineime_ipc::encode(&resp);
             if !write_all(h, &bytes) {
                 break;
@@ -118,6 +129,7 @@ fn handle(
     req: Request,
     ui: &Arc<Mutex<UiState>>,
     changed: &Arc<AtomicBool>,
+    deploy_done: &Arc<AtomicBool>,
 ) -> Response {
     match req {
         Request::Hello { pid } => {
@@ -141,6 +153,8 @@ fn handle(
             anchor_x,
             anchor_y,
         } => {
+            // first-run deploy may still be running; wait (up to 3 min)
+            wait_for_deploy(deploy_done);
             let handled = sess.process_key(keycode, mask);
             let commit = sess.get_commit();
             let context = sess.get_context().map(|c| context_msg(&c)).unwrap_or_default();

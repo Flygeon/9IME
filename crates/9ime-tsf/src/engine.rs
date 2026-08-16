@@ -44,6 +44,21 @@ pub fn current_mask() -> u32 {
 
 static CLIENT: OnceLock<Mutex<Option<Client>>> = OnceLock::new();
 
+fn log_line(msg: &str) {
+    // diagnostic: %APPDATA%\9IME\tsf.log (appends one line per call)
+    if let Ok(dir) = std::env::var("APPDATA") {
+        let path = std::path::Path::new(&dir).join("9IME").join("tsf.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            use std::io::Write;
+            let _ = writeln!(f, "{msg}");
+        }
+    }
+}
+
 fn with_client<T>(f: impl FnOnce(&mut Option<Client>) -> T) -> T {
     let c = CLIENT.get_or_init(|| Mutex::new(None));
     let mut guard = c.lock().unwrap();
@@ -94,6 +109,9 @@ pub fn process_key(ke: &KeyEvent) -> EngineOutput {
     with_client(|c| {
         if c.is_none() {
             *c = Client::connect();
+            if c.is_none() {
+                log_line("connect to server failed - keys will pass through");
+            }
         }
         match c.as_ref().and_then(|cl| cl.request(&req)) {
             Some(Response::KeyResult { handled, commit, .. }) => {
@@ -104,6 +122,7 @@ pub fn process_key(ke: &KeyEvent) -> EngineOutput {
                 }
             }
             _ => {
+                log_line("server request failed - reconnecting next key");
                 *c = None;
                 EngineOutput::Passthrough
             }

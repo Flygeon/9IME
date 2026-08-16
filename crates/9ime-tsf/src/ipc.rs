@@ -144,7 +144,17 @@ impl Client {
         if let Some(h) = try_open() {
             return Some(Client { handle: h });
         }
-        // no server or a stale one: clear the pipe first
+        // launch the server (do not kill anything yet: a first-run server
+        // may legitimately be deploying and has not created the pipe yet)
+        launch_server();
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if let Some(h) = try_open() {
+                return Some(Client { handle: h });
+            }
+        }
+        // pipe still absent after 6s: likely a stale server holds it
+        // (or the launch failed); clear and retry once
         kill_stale_servers();
         std::thread::sleep(std::time::Duration::from_millis(300));
         launch_server();
