@@ -11,6 +11,7 @@ use nineime_librime::{ffi::RimeTraits, Rime};
 
 mod pipe;
 mod skin;
+mod slog;
 mod window;
 
 /// State shared with the UI thread (candidate window).
@@ -183,19 +184,18 @@ fn main() {
     let user = appdata_dir();
     let _ = std::fs::create_dir_all(&user);
 
-    println!("9IME server: rime.dll = {}", dll.display());
-    println!("9IME server: shared data = {}", shared.display());
-    println!("9IME server: user data = {}", user.display());
+    slog::log(&format!("start: rime.dll={} shared={} user={}", dll.display(), shared.display(), user.display()));
 
     let rime = match Rime::load(&dll) {
         Ok(r) => r,
         Err(e) => {
+            slog::log(&format!("FATAL cannot load librime: {e}"));
             eprintln!("server: cannot load librime: {e}");
             std::process::exit(1);
         }
     };
     let version = rime.version().unwrap_or_default();
-    println!("server: librime {version}");
+    slog::log(&format!("librime {version} loaded"));
 
     // traits must outlive initialize.
     let shared_c = cstr(&shared.to_string_lossy());
@@ -208,6 +208,7 @@ fn main() {
     traits.min_log_level = 1;
 
     if let Err(e) = rime.initialize(&traits) {
+        slog::log(&format!("FATAL initialize failed: {e}"));
         eprintln!("server: initialize failed: {e}");
         std::process::exit(1);
     }
@@ -215,10 +216,10 @@ fn main() {
     // deploy on first run (build dir missing)
     let build_dir = user.join("build");
     if !build_dir.join("default.yaml").exists() {
-        println!("server: first run, deploying...");
+        slog::log("first run, deploying (this can take a minute)...");
         match rime.deploy(true) {
-            Ok(ok) => println!("server: deploy ok={ok}"),
-            Err(e) => eprintln!("server: deploy failed: {e}"),
+            Ok(ok) => slog::log(&format!("deploy ok={ok}")),
+            Err(e) => slog::log(&format!("deploy failed: {e}")),
         }
     } else {
         // lightweight maintenance check (merges user config changes)
@@ -229,6 +230,7 @@ fn main() {
     let mut sess = match rime.create_session() {
         Ok(s) => s,
         Err(e) => {
+            slog::log(&format!("FATAL create_session failed: {e}"));
             eprintln!("server: create_session failed: {e}");
             std::process::exit(1);
         }
@@ -239,7 +241,7 @@ fn main() {
     let ui = Arc::new(Mutex::new(UiState::new()));
     let changed = Arc::new(AtomicBool::new(false));
     let win = window::CandidateWindow::spawn(ui.clone(), changed.clone());
-    println!("server: candidate window thread started");
+    slog::log("candidate window thread started");
 
     pipe::serve(&rime, &mut sess, ui.clone(), changed.clone());
 

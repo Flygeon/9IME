@@ -128,14 +128,27 @@ fn launch_server() {
     }
 }
 
+fn kill_stale_servers() {
+    // A previous 9IME installation may have left a broken nineime-server.exe
+    // holding the pipe; it would answer keys with passthrough forever.
+    let _ = std::process::Command::new("taskkill")
+        .args(["/f", "/im", "nineime-server.exe"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
 impl Client {
     /// Connect to the server, launching it if needed.
     pub fn connect() -> Option<Client> {
         if let Some(h) = try_open() {
             return Some(Client { handle: h });
         }
+        // no server or a stale one: clear the pipe first
+        kill_stale_servers();
+        std::thread::sleep(std::time::Duration::from_millis(300));
         launch_server();
-        for _ in 0..30 {
+        for _ in 0..15 {
             std::thread::sleep(std::time::Duration::from_millis(200));
             if let Some(h) = try_open() {
                 return Some(Client { handle: h });

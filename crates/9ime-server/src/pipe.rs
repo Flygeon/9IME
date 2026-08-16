@@ -90,7 +90,7 @@ pub fn serve(
             let _ = unsafe { CloseHandle(h) };
             continue;
         }
-        println!("9IME server: client connected");
+        crate::slog::log("client connected");
 
         loop {
             let Some(req) = read_msg(h) else { break };
@@ -108,7 +108,7 @@ pub fn serve(
             }
         }
         let _ = unsafe { CloseHandle(h) };
-        println!("9IME server: client disconnected");
+        crate::slog::log("client disconnected");
     }
 }
 
