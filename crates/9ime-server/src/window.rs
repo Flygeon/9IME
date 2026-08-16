@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::JoinHandle;
 
-use windows::core::PCWSTR;
+use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC,
@@ -33,7 +33,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::UiState;
 
-const CLASS_NAME: PCWSTR = PCWSTR::from_raw("NineImeCandWnd\0".as_ptr() as _);
+const CLASS_NAME: PCWSTR = w!("NineImeCandWnd");
 
 // Fallback palette (COLORREF 0x00BBGGRR) used when no skin is configured.
 const FB_BG: u32 = 0x00FFFFFF;
@@ -366,12 +366,18 @@ fn ui_thread(ui: Arc<Mutex<UiState>>, changed: Arc<AtomicBool>) {
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             ..Default::default()
         };
-        let _ = RegisterClassW(&wc);
+        if RegisterClassW(&wc) == 0 {
+            let err = windows::Win32::Foundation::GetLastError().0;
+            // 1410 = ERROR_CLASS_ALREADY_EXISTS is fine on re-registration
+            if err != 1410 {
+                crate::slog::log(&format!("RegisterClassW failed: {err}"));
+            }
+        }
 
         let hwnd = match CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
             CLASS_NAME,
-            PCWSTR::from_raw("9IME\0".as_ptr() as _),
+            w!("9IME"),
             WS_POPUP,
             0,
             0,
@@ -627,9 +633,11 @@ fn present(hwnd: HWND, visible: bool, ax: i32, ay: i32, frame: &Frame, gfx: Opti
             text_rects.push((*x - 2, *ty, *x + sz.cx + 4, *ty + line_h));
         }
 
-        // repair the alpha GDI clobbered inside the text rectangles:
-        // a pixel that has color but zero alpha was touched by TextOut and
-        // must be visible again (the content area is opaque by design)
+        // Repair the alpha GDI clobbered inside the text rectangles: GDI
+        // TextOut writes RGB but leaves the 4th byte zero on 32bpp DIBs, so
+        // glyph pixels (including pure-black ones) come back with alpha=0 and
+        // vanish under per-pixel alpha blending. The content area is opaque by
+        // design, so any pixel GDI touched there must become opaque again.
         let stride = w * 4;
         let frame_px = std::slice::from_raw_parts_mut(bits as *mut u8, h * stride);
         for &(rx, ry, rx1, ry1) in &text_rects {
@@ -640,9 +648,7 @@ fn present(hwnd: HWND, visible: bool, ax: i32, ay: i32, frame: &Frame, gfx: Opti
             for yy in y0..y1 {
                 for xx in x0..x1 {
                     let i = (yy as usize * w + xx as usize) * 4;
-                    if frame_px[i + 3] == 0
-                        && (frame_px[i] != 0 || frame_px[i + 1] != 0 || frame_px[i + 2] != 0)
-                    {
+                    if frame_px[i + 3] == 0 {
                         frame_px[i + 3] = 255;
                     }
                 }
